@@ -151,7 +151,7 @@ def get_client_ip():
     # For a Streamlit app, this would need to be implemented based on your deployment
     # This is a placeholder - integrate with your hosting environment as needed
     return "127.0.0.1"
-""" ________________________________Core__________________________________________________________________"""
+# ________________________________Core__________________________________________________________________
 def download_and_process_pdfs(state):
     """Download PDFs and extract content, without simulating content."""
     logger.info("Downloading and processing PDFs...")
@@ -398,7 +398,7 @@ def analyze_content(state):
     return {"final_answer": final_answer}
 
 
-"""________________________________________________Simplified Agent______________________________________________________________________________________"""
+#________________________________________________Simplified Agent______________________________________________________________________________________
 def create_simple_agent():
     """Create a simplified agent without using LangGraph."""
     def process_query(query, market=None):
