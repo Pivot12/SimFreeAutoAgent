@@ -7,7 +7,7 @@ groq
 langgraph
 langchain-groq
 streamlit-mermaid
-pydanti
+pydantic
 matplotlib
 networkx
 pillow
