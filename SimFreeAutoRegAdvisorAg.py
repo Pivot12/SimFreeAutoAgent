@@ -34,17 +34,15 @@ logger.addHandler(file_handler)
 
 # Display initial loading message
 with st.spinner("Loading application dependencies..."):
+    # Import optional dependencies with error handling
     try:
-        # Import optional dependencies with error handling
-        try:
-            import PyPDF2
-            from bs4 import BeautifulSoup
-            from groq import Groq
-        except ImportError as e:
-            st.error(f"Failed to import required dependencies: {str(e)}")
-            logger.error(f"Import error: {str(e)}")
-            st.stop()
-
+        import PyPDF2
+        from bs4 import BeautifulSoup
+        from groq import Groq
+    except ImportError as e:
+        st.error(f"Failed to import required dependencies: {str(e)}")
+        logger.error(f"Import error: {str(e)}")
+        st.stop()
 # Diagnostic logger for structured logging
 class DiagnosticLogger:
     """Handles structured diagnostic logging for the application."""
