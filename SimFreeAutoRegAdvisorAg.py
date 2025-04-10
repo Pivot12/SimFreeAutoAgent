@@ -1,11 +1,41 @@
 
-# Add these imports for the diagnostic logging system
-import json
-import datetime
-import uuid
-import hashlib
+import os
+import re
+import base64
+import requests
+import io
+import streamlit as st
+import pandas as pd
 import logging
-from logging.handlers import RotatingFileHandler
+from typing import Dict, List, Any, Tuple
+from PIL import Image
+from io import BytesIO
+import matplotlib.pyplot as plt
+import networkx as nx
+
+# Import other libraries with try/except for better error handling
+try:
+    import PyPDF2
+    from streamlit_mermaid import st_mermaid
+    from groq import Groq
+    from bs4 import BeautifulSoup
+    from langchain.text_splitter import RecursiveCharacterTextSplitter
+except Exception as e:
+    st.error(f"Error importing libraries: {str(e)}")
+    st.info("Some dependencies might be missing. Check your requirements.txt file.")
+
+# Set up logging with a more robust approach
+log_dir = "logs"
+os.makedirs(log_dir, exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(os.path.join(log_dir, "app.log")),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 class DiagnosticLogger:
     """Handles structured diagnostic logging for the application."""
@@ -398,7 +428,8 @@ def analyze_content(state):
     return {"final_answer": final_answer}
 
 
-#________________________________________________Simplified Agent______________________________________________________________________________________
+# ________________________________________________Simplified Agent______________________________________________________________________________________
+
 def create_simple_agent():
     """Create a simplified agent without using LangGraph."""
     def process_query(query, market=None):
