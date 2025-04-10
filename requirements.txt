@@ -4,6 +4,7 @@ PyPDF2
 beautifulsoup4
 pandas
 groq
+langchain
 langgraph
 langchain-groq
 streamlit-mermaid
