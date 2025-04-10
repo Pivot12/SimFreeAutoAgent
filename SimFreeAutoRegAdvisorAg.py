@@ -1,69 +1,64 @@
-
 import os
 import re
 import base64
 import requests
 import io
+import json
+import datetime
+import uuid
+import hashlib
+import logging
+from logging.handlers import RotatingFileHandler
 import streamlit as st
 import pandas as pd
-import logging
 from typing import Dict, List, Any, Tuple
 from PIL import Image
 from io import BytesIO
 import matplotlib.pyplot as plt
 import networkx as nx
 
-# Import other libraries with try/except for better error handling
-try:
-    import PyPDF2
-    from streamlit_mermaid import st_mermaid
-    from groq import Groq
-    from bs4 import BeautifulSoup
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
-except Exception as e:
-    st.error(f"Error importing libraries: {str(e)}")
-    st.info("Some dependencies might be missing. Check your requirements.txt file.")
+# Set page configuration early to avoid StreamlitAPIException
+st.set_page_config(page_title="Automotive Regulations AI Agent", layout="wide")
 
-# Set up logging with a more robust approach
-log_dir = "logs"
-os.makedirs(log_dir, exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(os.path.join(log_dir, "app.log")),
-        logging.StreamHandler()
-    ]
-)
+# Create logs directory
+os.makedirs("logs", exist_ok=True)
+
+# Configure basic logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Add file handler
+file_handler = RotatingFileHandler("logs/app.log", maxBytes=10*1024*1024, backupCount=5)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+logger.addHandler(file_handler)
+
+# Display initial loading message
+with st.spinner("Loading application dependencies..."):
+    try:
+        # Import optional dependencies with error handling
+        try:
+            import PyPDF2
+            from bs4 import BeautifulSoup
+            from groq import Groq
+        except ImportError as e:
+            st.error(f"Failed to import required dependencies: {str(e)}")
+            logger.error(f"Import error: {str(e)}")
+            st.stop()
+
+# Diagnostic logger for structured logging
 class DiagnosticLogger:
     """Handles structured diagnostic logging for the application."""
     
-    def __init__(self, log_file_path="logs/diagnostic.log", github_logging=False, 
-                 github_repo_owner=None, github_repo_name=None, github_token=None):
-        # Create logs directory if it doesn't exist
+    def __init__(self, log_file_path="logs/diagnostic.json"):
+        self.log_file_path = log_file_path
+        
+        # Ensure log directory exists
         os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
         
-        self.logger = logging.getLogger("diagnostic_logger")
-        self.logger.setLevel(logging.INFO)
-        
-        # Create handler for file
-        handler = RotatingFileHandler(log_file_path, maxBytes=10*1024*1024, backupCount=5)
-        formatter = logging.Formatter('%(message)s')
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-        
-        # Set up GitHub logging if enabled
-        self.github_logging = github_logging
-        if github_logging and github_repo_owner and github_repo_name:
-            self.github_logger = GitHubLogger(
-                repo_owner=github_repo_owner,
-                repo_name=github_repo_name,
-                token=github_token
-            )
-        else:
-            self.github_logging = False
+        # Create file if it doesn't exist
+        if not os.path.exists(log_file_path):
+            with open(log_file_path, 'w') as f:
+                f.write(json.dumps([]))
     
     def log_session(self, user_id, query, market, accessed_documents, error=None, answer=None):
         """Log a complete session with structured data."""
@@ -82,15 +77,22 @@ class DiagnosticLogger:
             "answer": answer
         }
         
-        # Log as JSON string to file
-        self.logger.info(json.dumps(log_entry))
+        # Read existing logs
+        try:
+            with open(self.log_file_path, 'r') as f:
+                try:
+                    logs = json.load(f)
+                except json.JSONDecodeError:
+                    logs = []
+        except FileNotFoundError:
+            logs = []
         
-        # Also log to GitHub if enabled
-        if self.github_logging:
-            try:
-                self.github_logger.push_log(log_entry)
-            except Exception as e:
-                self.logger.error(f"Failed to log to GitHub: {str(e)}")
+        # Append new log
+        logs.append(log_entry)
+        
+        # Write back to file
+        with open(self.log_file_path, 'w') as f:
+            json.dump(logs, f, indent=2)
         
         return session_id
     
@@ -99,6 +101,7 @@ class DiagnosticLogger:
         # Hash the IP address to anonymize it
         return hashlib.sha256(ip_address.encode()).hexdigest()[:16]
 
+# Github logging is optional and configured separately if needed
 class GitHubLogger:
     """Handles logging to a GitHub repository."""
     
@@ -151,7 +154,7 @@ class GitHubLogger:
         
         # Prepare the commit data
         commit_data = {
-            "message": f"Update diagnostic log: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+            "message": f"Update diagnostic log: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             "content": encoded_content,
             "branch": self.branch
         }
@@ -174,18 +177,266 @@ class GitHubLogger:
             logger.error(f"Error pushing log to GitHub: {str(e)}")
             return False
 
+# Diagram Image Creation
+def create_diagram_image():
+    """Create a diagram image using NetworkX and Matplotlib"""
+    try:
+        # Create a graph
+        G = nx.DiGraph()
+        # Add nodes with positions for a more controlled layout
+        nodes = {
+            "User Input": {"pos": (0, 0)},
+            "Market Selection": {"pos": (0, -1)},
+            "Process Query": {"pos": (1, -0.5)},
+            "Initialize Agent": {"pos": (2, -0.5)},
+            "Processing Pipeline": {"pos": (3, -0.5)},
+            "Document Analysis": {"pos": (4, -0.5)},
+            "Generate Answer": {"pos": (5, -0.5)},
+            "Groq LLM API": {"pos": (3, -2)},
+            "PDF Processing": {"pos": (4, -1.5)},
+            "Error Handling": {"pos": (2, -2)}
+        }
+        # Add all nodes
+        for node, attrs in nodes.items():
+            G.add_node(node, **attrs)
+        # Define node colors by category
+        node_colors = {
+            "User Input": "#d0f0c0",
+            "Market Selection": "#d0f0c0",
+            "Process Query": "#d0f0c0",
+            "Initialize Agent": "#c5daf9",
+            "Processing Pipeline": "#c5daf9",
+            "Document Analysis": "#c5daf9",
+            "Generate Answer": "#c5daf9",
+            "Groq LLM API": "#f9d6c5",
+            "PDF Processing": "#c5daf9",
+            "Error Handling": "#f9c5c5"
+        }
+        # Add edges (connections)
+        edges = [
+            ("User Input", "Process Query"),
+            ("Market Selection", "Process Query"),
+            ("Process Query", "Initialize Agent"),
+            ("Initialize Agent", "Processing Pipeline"),
+            ("Processing Pipeline", "Document Analysis"),
+            ("Document Analysis", "Generate Answer"),
+            ("Groq LLM API", "Processing Pipeline"),
+            ("Groq LLM API", "Document Analysis"),
+            ("Groq LLM API", "Generate Answer"),
+            ("Document Analysis", "PDF Processing"),
+            ("Error Handling", "Processing Pipeline"),
+            ("Error Handling", "Document Analysis")
+        ]
+        G.add_edges_from(edges)
+        # Create figure with a white background
+        plt.figure(figsize=(10, 6), facecolor='white')
+        # Get node positions
+        pos = nx.get_node_attributes(G, 'pos')
+        # Draw nodes with custom colors
+        for node, color in node_colors.items():
+            nx.draw_networkx_nodes(G, pos, nodelist=[node], node_color=color,
+                                  node_size=2500, edgecolors='black')
+        # Draw regular edges (solid lines)
+        regular_edges = [(u, v) for u, v in edges if u not in ["Groq LLM API", "Error Handling"]]
+        nx.draw_networkx_edges(G, pos, edgelist=regular_edges, arrows=True, arrowsize=20,
+                              width=1.5, edge_color='black')
+        # Draw special edges (dashed lines)
+        special_edges = [(u, v) for u, v in edges if u in ["Groq LLM API", "Error Handling"]]
+        nx.draw_networkx_edges(G, pos, edgelist=special_edges, arrows=True, arrowsize=20,
+                              width=1.5, edge_color='gray', style='dashed')
+        # Add labels with white background for better readability
+        label_options = {"fc": "white", "alpha": 0.8, "bbox": {"pad": 5, "boxstyle": "round"}}
+        nx.draw_networkx_labels(G, pos, font_size=10, font_weight='bold', bbox=label_options)
+        # Remove axes
+        plt.axis('off')
+        plt.tight_layout()
+        # Save the plot to a BytesIO object
+        buffer = BytesIO()
+        plt.savefig(buffer, format='png', dpi=120, bbox_inches='tight')
+        buffer.seek(0)
+        plt.close()
+        # Create image from buffer
+        image = Image.open(buffer)
+        return image
+    except Exception as e:
+        logger.error(f"Error creating diagram: {str(e)}")
+        return None
+
+# Function to get base64 encoded image for embedded display
+def get_image_base64(image):
+    """Convert PIL image to base64 for HTML embedding"""
+    try:
+        buffered = BytesIO()
+        image.save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode()
+        return img_str
+    except Exception as e:
+        logger.error(f"Error encoding image: {str(e)}")
+        return None
+
 # Function to get client IP address
 def get_client_ip():
     """Get the client IP address for diagnostic logging."""
-    # In a real deployment, you would access this from the request object
-    # For a Streamlit app, this would need to be implemented based on your deployment
-    # This is a placeholder - integrate with your hosting environment as needed
-    return "127.0.0.1"
-# ________________________________Core__________________________________________________________________
-def download_and_process_pdfs(state):
-    """Download PDFs and extract content, without simulating content."""
+    try:
+        # In Streamlit, we can't directly access client IP
+        # This is a placeholder - in production you would need to implement
+        # based on your hosting environment
+        return "127.0.0.1"
+    except Exception as e:
+        logger.error(f"Error getting client IP: {str(e)}")
+        return "unknown"
+
+# Initialize Groq client safely
+def initialize_groq_client():
+    """Initialize the Groq client with proper error handling."""
+    try:
+        # Try to get API key from environment variables
+        api_key = os.environ.get("GROQ_API_KEY")
+        
+        # Try to get from Streamlit secrets if available
+        if not api_key and hasattr(st, 'secrets'):
+            try:
+                api_key = st.secrets.get("GROQ_API_KEY", "")
+            except Exception as e:
+                logger.warning(f"Could not access Streamlit secrets: {str(e)}")
+        
+        # Fallback to hardcoded key (only for development)
+        if not api_key:
+            api_key = "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"
+            logger.warning("Using hardcoded API key - not recommended for production")
+        
+        if not api_key:
+            logger.error("No Groq API key found")
+            return None
+            
+        return Groq(api_key=api_key)
+    except Exception as e:
+        logger.error(f"Failed to initialize Groq client: {str(e)}")
+        return None
+
+# Updated automotive regulatory websites with error handling
+REGULATORY_WEBSITES = {
+    "US": "https://www.nhtsa.gov/laws-regulations/fmvss",
+    "EU": "https://unece.org/transport/vehicle-regulations",
+    "China": "https://www.cccauthorization.com/ccc-certification/automotive-regulations",
+    "India": "https://bis.gov.in/index.php/standards/technical-department/transport-engineering/",
+    "Australia": "https://www.infrastructure.gov.au/infrastructure-transport-vehicles/vehicles/vehicle-design-regulation/australian-design-rules"
+}
+
+# Define state operations
+def get_market(query, client):
+    """Determine which market to look for regulatory documents."""
+    logger.info("Starting market determination...")
+    
+    prompt = f"""
+    Based on the following query, determine which automotive regulatory market the user is interested in (US, EU, China, India, or Australia).
+    If the market is not clear, respond with "UNCLEAR".
+    
+    Query: {query}
+    
+    Return only the market name or "UNCLEAR" without any additional text.
+    """
+    
+    try:
+        # Call LLM to determine market
+        logger.info("Calling LLM to determine market...")
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=10
+        )
+        
+        market = response.choices[0].message.content.strip()
+        logger.info(f"Market determined: {market}")
+        
+        if market not in REGULATORY_WEBSITES and market != "UNCLEAR":
+            logger.warning(f"LLM returned invalid market: {market}")
+            market = "UNCLEAR"
+            
+        return market
+    except Exception as e:
+        logger.error(f"Error determining market: {str(e)}")
+        return "UNCLEAR"
+
+def extract_pdf_links(url, query, client):
+    """Extract PDF links from the regulatory website."""
+    logger.info(f"Extracting PDF links from {url}...")
+    
+    try:
+        logger.info(f"Fetching content from {url}")
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()  # Raise exception for non-200 status codes
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Find all links on the page
+        links = soup.find_all('a')
+        
+        # Extract PDF links
+        pdf_links = []
+        for link in links:
+            href = link.get('href')
+            if href and href.endswith('.pdf'):
+                full_url = href if href.startswith('http') else (url + href if not url.endswith('/') else url + '/' + href)
+                if link.text:
+                    pdf_links.append((link.text.strip(), full_url))
+        
+        logger.info(f"Found {len(pdf_links)} PDF links")
+        
+        if not pdf_links:
+            logger.warning("No PDF links found on the regulatory website")
+            return []
+        
+        # Use LLM to select relevant PDFs based on the query
+        prompt = f"""
+        Based on the user query: "{query}", select the most relevant PDF documents from the following list.
+        Return the indices of the selected documents (0-based) as a comma-separated list.
+        
+        PDFs:
+        {pd.DataFrame(pdf_links, columns=['Title', 'URL']).to_string()}
+        
+        Return only the indices as a comma-separated list, without any additional text.
+        If none of the documents seem relevant to the query, return "NONE".
+        """
+        
+        logger.info("Calling LLM to select relevant PDFs...")
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=100
+        )
+        
+        # Extract indices from response
+        indices_str = response.choices[0].message.content.strip()
+        logger.info(f"LLM response for PDF selection: {indices_str}")
+        
+        if indices_str == "NONE":
+            logger.warning("LLM determined no relevant PDFs for the query")
+            return []
+        
+        try:
+            indices = [int(idx.strip()) for idx in indices_str.split(',') if idx.strip().isdigit()]
+            
+            # Get selected PDFs
+            selected_pdfs = [pdf_links[idx] for idx in indices if idx < len(pdf_links)]
+            logger.info(f"Selected {len(selected_pdfs)} PDFs")
+            
+            return selected_pdfs
+        except Exception as e:
+            logger.error(f"Error parsing LLM response for PDF selection: {str(e)}")
+            # Return a subset of PDFs if parsing fails
+            return pdf_links[:3] if pdf_links else []
+    
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error fetching website {url}: {str(e)}")
+        return []
+    except Exception as e:
+        logger.error(f"Error extracting PDF links: {str(e)}")
+        return []
+
+def download_and_process_pdfs(pdf_urls):
+    """Download PDFs and extract content."""
     logger.info("Downloading and processing PDFs...")
-    pdf_urls = state.pdf_urls
     pdf_contents = {}
     
     successful_downloads = 0
@@ -238,86 +489,16 @@ def download_and_process_pdfs(state):
     if successful_downloads == 0:
         logger.warning("No PDFs were successfully downloaded and processed")
     
-    return {"pdf_contents": pdf_contents}
+    return pdf_contents
 
-def extract_pdf_links(state):
-    """Extract PDF links from the regulatory website without using example links."""
-    logger.info("Extracting PDF links...")
-    url = state.selected_url
-    query = state.query
-    
-    try:
-        logger.info(f"Fetching content from {url}")
-        response = requests.get(url, timeout=30)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Find all links on the page
-        links = soup.find_all('a')
-        
-        # Extract PDF links
-        pdf_links = []
-        for link in links:
-            href = link.get('href')
-            if href and href.endswith('.pdf'):
-                full_url = href if href.startswith('http') else (url + href if not url.endswith('/') else url + '/' + href)
-                if link.text:
-                    pdf_links.append((link.text.strip(), full_url))
-        
-        logger.info(f"Found {len(pdf_links)} PDF links")
-        
-        if not pdf_links:
-            logger.warning("No PDF links found on the regulatory website")
-            return {"pdf_urls": []}
-        
-        # Use LLM to select relevant PDFs based on the query
-        prompt = f"""
-        Based on the user query: "{query}", select the most relevant PDF documents from the following list.
-        Return the indices of the selected documents (0-based) as a comma-separated list.
-        
-        PDFs:
-        {pd.DataFrame(pdf_links, columns=['Title', 'URL']).to_string()}
-        
-        Return only the indices as a comma-separated list, without any additional text.
-        If none of the documents seem relevant to the query, return "NONE".
-        """
-        
-        logger.info("Calling LLM to select relevant PDFs...")
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=100
-        )
-        
-        # Extract indices from response
-        indices_str = response.choices[0].message.content.strip()
-        logger.info(f"LLM response for PDF selection: {indices_str}")
-        
-        if indices_str == "NONE":
-            logger.warning("LLM determined no relevant PDFs for the query")
-            return {"pdf_urls": []}
-        
-        indices = [int(idx.strip()) for idx in indices_str.split(',') if idx.strip().isdigit()]
-        
-        # Get selected PDFs
-        selected_pdfs = [pdf_links[idx] for idx in indices if idx < len(pdf_links)]
-        logger.info(f"Selected {len(selected_pdfs)} PDFs")
-        
-        return {"pdf_urls": selected_pdfs}
-    
-    except Exception as e:
-        logger.error(f"Error extracting PDF links: {str(e)}")
-        return {"pdf_urls": []}
-
-def analyze_content(state):
+def analyze_content(query, pdf_contents, client):
     """Analyze PDF content and generate answer with factual verification."""
     logger.info("Analyzing content...")
-    query = state.query
-    pdf_contents = state.pdf_contents
     
     # Check if we have any PDF contents to analyze
     if not pdf_contents:
         logger.warning("No PDF contents available for analysis")
-        return {"final_answer": "I'm sorry, but I couldn't find any relevant regulatory documents to answer your query. Please try a different query or select a specific market."}
+        return "I'm sorry, but I couldn't find any relevant regulatory documents to answer your query. Please try a different query or select a specific market."
     
     # Combine all contents
     combined_text = ""
@@ -325,12 +506,28 @@ def analyze_content(state):
         combined_text += f"--- Document: {title} ---\n{content}\n\n"
     
     # Split text into chunks to stay within token limits
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=30000,  # Adjust based on token limit
-        chunk_overlap=200,
-        length_function=len,
-    )
-    chunks = text_splitter.split_text(combined_text)
+    try:
+        from langchain.text_splitter import RecursiveCharacterTextSplitter
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=30000,  # Adjust based on token limit
+            chunk_overlap=200,
+            length_function=len,
+        )
+        chunks = text_splitter.split_text(combined_text)
+    except ImportError:
+        # Manual fallback text splitting if langchain is not available
+        chunks = []
+        max_chunk_size = 30000
+        current_chunk = ""
+        for line in combined_text.split("\n"):
+            if len(current_chunk) + len(line) + 1 <= max_chunk_size:
+                current_chunk += line + "\n"
+            else:
+                chunks.append(current_chunk)
+                current_chunk = line + "\n"
+        if current_chunk:
+            chunks.append(current_chunk)
+            
     logger.info(f"Split content into {len(chunks)} chunks")
     
     # Process chunks and collect insights with citations
@@ -378,7 +575,7 @@ def analyze_content(state):
     # If no insights found at all, return a "no answer" response
     if not insights:
         logger.warning("No relevant insights found in any document chunks")
-        return {"final_answer": "I'm sorry, but I couldn't find any information in the regulatory documents that addresses your query. The documents I examined don't contain specific information about this topic."}
+        return "I'm sorry, but I couldn't find any information in the regulatory documents that addresses your query. The documents I examined don't contain specific information about this topic."
     
     # Combine insights and generate final answer with factual verification
     combined_insights = "\n\n".join(insights)
@@ -421,269 +618,250 @@ def analyze_content(state):
                 final_answer = "I apologize, but I couldn't find specific information in the regulatory documents that addresses your query. Please try rephrasing your question or selecting a different market."
         
         logger.info("Final answer generated successfully")
+        return final_answer
     except Exception as e:
         logger.error(f"Error generating final answer: {str(e)}")
-        final_answer = f"I apologize, but I encountered an error while processing your query. Please try again or rephrase your question."
+        return "I apologize, but I encountered an error while processing your query. Please try again or rephrase your question."
+
+def process_query(query, market=None, client=None):
+    """Process a query using the simplified agent."""
+    logger.info(f"Processing query: {query}, market: {market or 'Auto-detect'}")
     
-    return {"final_answer": final_answer}
-
-
-# ________________________________________________Simplified Agent______________________________________________________________________________________
-
-def create_simple_agent():
-    """Create a simplified agent without using LangGraph."""
-    def process_query(query, market=None):
-        logger.info("Starting simplified agent processing")
-        results = {
-            "query": query,
-            "market": market,
-            "selected_url": "",
-            "pdf_urls": [],
-            "pdf_contents": {},
-            "final_answer": ""
-        }
-        
-        # Step 1: Determine market if not provided
-        if not market:
-            logger.info("Determining market...")
-            prompt = f"""
-            Based on the following query, determine which automotive regulatory market the user is interested in (US, EU, China, India, or Australia).
-            If the market is not clear, respond with "UNCLEAR".
-            
-            Query: {query}
-            
-            Return only the market name or "UNCLEAR" without any additional text.
-            """
-            
-            try:
-                response = client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=10
-                )
-                market = response.choices[0].message.content.strip()
-                results["market"] = market
-            except Exception as e:
-                logger.error(f"Error determining market: {str(e)}")
-                results["market"] = "UNCLEAR"
-                results["final_answer"] = "I apologize, but I encountered an error while processing your query. Please try again or specify a market explicitly."
-                return results
-        
-        # Step 2: Select URL
-        if results["market"] in REGULATORY_WEBSITES:
-            results["selected_url"] = REGULATORY_WEBSITES[results["market"]]
-        else:
-            logger.warning(f"Market {results['market']} not found in regulatory websites")
-            results["selected_url"] = "UNCLEAR"
-            results["final_answer"] = "I apologize, but I couldn't identify a relevant regulatory market for your query. Please select a specific market (US, EU, China, India, or Australia) and try again."
-            return results
-        
-        # Step 3: Extract PDF links without using example links
-        try:
-            url = results["selected_url"]
-            logger.info(f"Fetching content from {url}")
-            
-            response = requests.get(url, timeout=30)
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            links = soup.find_all('a')
-            pdf_links = []
-            
-            for link in links:
-                href = link.get('href')
-                if href and href.endswith('.pdf'):
-                    full_url = href if href.startswith('http') else (url + href if not url.endswith('/') else url + '/' + href)
-                    if link.text:
-                        pdf_links.append((link.text.strip(), full_url))
-            
-            if not pdf_links:
-                logger.warning("No PDF links found on the regulatory website")
-                results["final_answer"] = "I apologize, but I couldn't find any regulatory documents on the official website that address your query. Please try a different query or select a different market."
-                return results
-            
-            # Select relevant PDFs
-            prompt = f"""
-            Based on the user query: "{query}", select the most relevant PDF documents from the following list.
-            Return the indices of the selected documents (0-based) as a comma-separated list.
-            
-            PDFs:
-            {pd.DataFrame(pdf_links, columns=['Title', 'URL']).to_string()}
-            
-            Return only the indices as a comma-separated list, without any additional text.
-            If none of the documents seem relevant to the query, return "NONE".
-            """
-            
-            response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=100
-            )
-            
-            indices_str = response.choices[0].message.content.strip()
-            
-            if indices_str == "NONE":
-                logger.warning("LLM determined no relevant PDFs for the query")
-                results["final_answer"] = "I apologize, but I couldn't find any regulatory documents that appear relevant to your query. Please try rephrasing your question or selecting a different market."
-                return results
-            
-            indices = [int(idx.strip()) for idx in indices_str.split(',') if idx.strip().isdigit()]
-            selected_pdfs = [pdf_links[idx] for idx in indices if idx < len(pdf_links)]
-            
-            results["pdf_urls"] = selected_pdfs
-        except Exception as e:
-            logger.error(f"Error extracting PDF links: {str(e)}")
-            results["pdf_urls"] = []
-            results["final_answer"] = f"I apologize, but I encountered an error while searching for relevant documents: {str(e)}. Please try again later."
-            return results
-        
-        # Step 4: Download and process PDFs without simulating content
-        pdf_contents = {}
-        successful_downloads = 0
-        
-        for title, url in results["pdf_urls"]:
-            try:
-                logger.info(f"Downloading PDF: {title} from {url}")
-                
-                # Skip example URLs
-                if "example.com" in url:
-                    logger.warning(f"Skipping example URL: {url}")
-                    continue
-                
-                response = requests.get(url, timeout=30)
-                
-                # Check if the response is valid
-                if response.status_code != 200:
-                    logger.warning(f"Failed to download PDF: {url}, status code: {response.status_code}")
-                    continue
-                    
-                pdf_file = io.BytesIO(response.content)
-                
-                # Read PDF content
-                reader = PyPDF2.PdfReader(pdf_file)
-                text = ""
-                for page in reader.pages:
-                    page_text = page.extract_text()
-                    if page_text:  # Only add if text was successfully extracted
-                        text += page_text + "\n"
-                
-                # Only add if we got actual content
-                if text.strip():
-                    pdf_contents[title] = text
-                    successful_downloads += 1
-                    logger.info(f"Successfully processed PDF: {title}")
-                else:
-                    logger.warning(f"No text could be extracted from PDF: {title}")
-            except Exception as e:
-                logger.error(f"Error processing PDF {title}: {str(e)}")
-        
-        if successful_downloads == 0:
-            logger.warning("No PDFs were successfully downloaded and processed")
-            results["final_answer"] = "I apologize, but I couldn't successfully download or process any of the regulatory documents. Please try again later or with a different query."
-            return results
-        
-        results["pdf_contents"] = pdf_contents
-        
-        # Step 5: Analyze content with factual verification
-        insights = []
-        combined_text = ""
-        
-        for title, content in results["pdf_contents"].items():
-            combined_text += f"--- Document: {title} ---\n{content}\n\n"
-        
-        # Split into chunks if needed
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=30000,
-            chunk_overlap=200,
-            length_function=len,
-        )
-        chunks = text_splitter.split_text(combined_text)
-        
-        for i, chunk in enumerate(chunks):
-            prompt = f"""
-            I'm analyzing automotive regulatory documents to answer a user's query.
-            
-            User query: {query}
-            
-            Document text (chunk {i+1}/{len(chunks)}):
-            {chunk}
-            
-            For this text chunk, please:
-            1. Extract key insights relevant to the query
-            2. For each insight, provide the exact source document name and direct quotes that support it
-            3. If you don't find any relevant information in this chunk, explicitly state "NO RELEVANT INFORMATION FOUND IN THIS CHUNK"
-            
-            Format each insight as:
-            INSIGHT: [Your insight here]
-            SOURCE: [Document name]
-            EVIDENCE: "[Direct quote from document]"
-            
-            Be strict about only including insights with direct evidence from the documents.
-            """
-            
-            try:
-                response = client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=1000
-                )
-                chunk_insights = response.choices[0].message.content
-                
-                # Only add if there are actually insights found
-                if "NO RELEVANT INFORMATION FOUND IN THIS CHUNK" not in chunk_insights:
-                    insights.append(chunk_insights)
-            except Exception as e:
-                logger.error(f"Error processing chunk {i+1}: {str(e)}")
-        
-        # If no insights found at all, return a "no answer" response
-        if not insights:
-            logger.warning("No relevant insights found in any document chunks")
-            results["final_answer"] = "I'm sorry, but I couldn't find any information in the regulatory documents that addresses your query. The documents I examined don't contain specific information about this topic."
-            return results
-        
-        # Generate final answer with factual verification
-        combined_insights = "\n\n".join(insights)
-        
-        prompt = f"""
-        Based on the following insights extracted from automotive regulatory documents, provide a comprehensive answer to the user's query.
-        
-        User query: {query}
-        
-        Insights from documents (with sources and evidence):
-        {combined_insights}
-        
-        Important instructions:
-        1. Your answer MUST be derived ONLY from the document insights provided above
-        2. Each statement in your answer must include a citation to the specific document source
-        3. Do not make any claims or statements that aren't directly supported by the document evidence
-        4. If the insights don't fully address the query, acknowledge the limitations of the available information
-        5. If the insights don't address the query at all, respond with: "I apologize, but I couldn't find information that addresses your query in the regulatory documents I examined."
-        6. Format citations as: [Source Document Name]
-        
-        Provide a well-structured, accurate, and factual answer focusing ONLY on what's present in the automotive regulations documents.
-        """
-        
-        try:
-            response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=2000
-            )
-            final_answer = response.choices[0].message.content
-            
-            # Verification check
-            if "I apologize, but I couldn't find information" in final_answer:
-                logger.info("Response indicates no relevant information found")
-            else:
-                # Verify that the answer contains citations
-                if "[" not in final_answer and "]" not in final_answer:
-                    logger.warning("Answer doesn't contain proper citations, likely hallucinating")
-                    final_answer = "I apologize, but I couldn't find specific information in the regulatory documents that addresses your query. Please try rephrasing your question or selecting a different market."
-            
-            results["final_answer"] = final_answer
-        except Exception as e:
-            logger.error(f"Error generating final answer: {str(e)}")
-            results["final_answer"] = f"I apologize, but I encountered an error while processing your query. Please try again or rephrase your question."
-        
+    results = {
+        "query": query,
+        "market": market,
+        "selected_url": "",
+        "pdf_urls": [],
+        "pdf_contents": {},
+        "final_answer": ""
+    }
+    
+    # Step 1: Check if client is initialized
+    if not client:
+        logger.error("Groq client not initialized")
+        results["final_answer"] = "I apologize, but I couldn't connect to the AI service. Please try again later."
         return results
+    
+    # Step 2: Determine market if not provided
+    if not market:
+        logger.info("Determining market...")
+        results["market"] = get_market(query, client)
+        if results["market"] == "UNCLEAR":
+            logger.warning("Could not determine market automatically")
+            results["final_answer"] = "I couldn't determine which market's regulations you're interested in. Please select a specific market (US, EU, China, India, or Australia) and try again."
+            return results
+    
+    # Step 3: Select URL
+    if results["market"] in REGULATORY_WEBSITES:
+        results["selected_url"] = REGULATORY_WEBSITES[results["market"]]
+        logger.info(f"Selected URL: {results['selected_url']}")
+    else:
+        logger.warning(f"Market {results['market']} not found in regulatory websites")
+        results["final_answer"] = f"I apologize, but I don't have information on regulations for '{results['market']}'. Please select one of the available markets: US, EU, China, India, or Australia."
+        return results
+    
+    # Step 4: Extract PDF links
+    results["pdf_urls"] = extract_pdf_links(results["selected_url"], query, client)
+    if not results["pdf_urls"]:
+        logger.warning("No relevant PDF links found")
+        results["final_answer"] = "I couldn't find any relevant regulatory documents for your query. Please try a different query or select a different market."
+        return results
+    
+    # Step 5: Download and process PDFs
+    results["pdf_contents"] = download_and_process_pdfs(results["pdf_urls"])
+    if not results["pdf_contents"]:
+        logger.warning("No PDF contents could be extracted")
+        results["final_answer"] = "I couldn't successfully download or extract content from the regulatory documents. Please try again later or with a different query."
+        return results
+    
+    # Step 6: Analyze content and generate answer
+    results["final_answer"] = analyze_content(query, results["pdf_contents"], client)
+    
+    return results
 
-    return process_query
+# Main application
+def main():
+    st.title("Automotive Regulations AI Agent")
+    
+    # Sidebar for logs
+    st.sidebar.title("Execution Logs")
+    log_placeholder = st.sidebar.empty()
+    
+    # Create a log handler that writes to the streamlit sidebar
+    log_output = []
+    
+    class StreamlitLogHandler(logging.Handler):
+        def emit(self, record):
+            log_record = self.format(record)
+            log_output.append(log_record)
+            log_placeholder.text('\n'.join(log_output[-30:]))  # Keep only last 30 logs
+    
+    # Add the streamlit handler to the logger
+    streamlit_handler = StreamlitLogHandler()
+    logger.addHandler(streamlit_handler)
+    
+    # Initialize diagnostic logger
+    diagnostic_logger = DiagnosticLogger()
+    
+    # Initialize Groq client
+    client = initialize_groq_client()
+    if not client:
+        st.error("Failed to initialize Groq API client. Please check your API key configuration.")
+        st.info("To configure the API key, you can use Streamlit secrets or environment variables.")
+        return
+    
+    st.success("API key is configured. Ready to use!")
+    
+    # User query
+    query = st.text_input("Enter your automotive regulatory query:")
+    
+    # Market selection
+    market_options = list(REGULATORY_WEBSITES.keys())
+    selected_market = st.selectbox("Select a market (or let the system detect it):", ["Auto-detect"] + market_options)
+    
+    if st.button("Process Query"):
+        if query:
+            with st.spinner("Processing your query..."):
+                logger.info(f"Processing query: {query}")
+                
+                # Set market if manually selected
+                market = None if selected_market == "Auto-detect" else selected_market
+                
+                # Get user IP for diagnostic logging (anonymized)
+                user_ip = get_client_ip()
+                user_id = diagnostic_logger.get_user_id(user_ip)
+                
+                # Process the query
+                try:
+                    result = process_query(query, market, client)
+                    
+                    # Log the session
+                    accessed_documents = [title for title, _ in result.get("pdf_urls", [])]
+                    diagnostic_logger.log_session(
+                        user_id=user_id,
+                        query=query,
+                        market=result.get("market", "UNKNOWN"),
+                        accessed_documents=accessed_documents,
+                        answer=result.get("final_answer", "")
+                    )
+                    
+                    # Display results
+                    st.subheader("Results")
+                    
+                    # Display the market
+                    if result["market"] and result["market"] != "UNCLEAR":
+                        st.write(f"Market: {result['market']}")
+                    else:
+                        st.error("Could not determine market automatically. Please select a market.")
+                        selected_market = st.selectbox("Please select a market:", market_options, key="market_select_after_error")
+                        if st.button("Confirm Market", key="confirm_market_button"):
+                            result = process_query(query, selected_market, client)
+                            
+                            # Log the session again with updated market
+                            accessed_documents = [title for title, _ in result.get("pdf_urls", [])]
+                            diagnostic_logger.log_session(
+                                user_id=user_id,
+                                query=query,
+                                market=selected_market,
+                                accessed_documents=accessed_documents,
+                                answer=result.get("final_answer", "")
+                            )
+                    
+                    # Display URL
+                    if result.get("selected_url"):
+                        st.write(f"Website: {result['selected_url']}")
+                    
+                    # Display documents
+                    st.subheader("Documents Analyzed")
+                    if result.get("pdf_urls") and len(result["pdf_urls"]) > 0:
+                        for title, url in result["pdf_urls"]:
+                            st.write(f"- {title} ([link]({url}))")
+                    else:
+                        st.write("No relevant documents were found or selected.")
+                    
+                    # Display answer
+                    st.subheader("Answer")
+                    st.write(result.get("final_answer", "No answer was generated."))
+                    
+                except Exception as e:
+                    error_message = str(e)
+                    logger.error(f"Error during processing: {error_message}")
+                    st.error(f"An error occurred while processing your query: {error_message}")
+                    
+                    # Log the error
+                    diagnostic_logger.log_session(
+                        user_id=user_id,
+                        query=query,
+                        market=market or "Auto-detect",
+                        accessed_documents=[],
+                        error=error_message
+                    )
+        else:
+            st.warning("Please enter a query.")
+    
+    # The architecture diagram
+    st.markdown("---")
+    st.subheader("How This Application Works")
+    
+    # Create a collapsible section for the diagram
+    with st.expander("Click to view the application architecture diagram"):
+        # Try to display the diagram
+        try:
+            # Generate diagram image
+            with st.spinner("Generating diagram image..."):
+                diagram_image = create_diagram_image()
+                if diagram_image:
+                    # Display the image
+                    st.image(diagram_image, caption="Application Architecture", use_column_width=True)
+                    # Add download option
+                    img_str = get_image_base64(diagram_image)
+                    if img_str:
+                        href = f'<a href="data:image/png;base64,{img_str}" download="regulatory_agent_diagram.png">Download Diagram Image</a>'
+                        st.markdown(href, unsafe_allow_html=True)
+                else:
+                    st.error("Could not generate diagram image")
+        except Exception as e:
+            st.error(f"Error displaying diagram: {str(e)}")
+            # Text-only fallback
+            st.code("""
+            User Input → Process Query → Initialize Agent → Processing Pipeline → Document Analysis → Generate Answer
+                                                                ↑                      ↑                 ↑
+                                                           Groq LLM API connections (provides intelligence)
+                                                                ↑                      ↑
+                                                          Error Handling (monitors process)
+                                                                                       ↓
+                                                                                PDF Processing
+            """)
+    
+    # Explanation of the diagram
+    st.markdown("""
+    ### Diagram Explanation
+    This diagram shows how the Automotive Regulatory Document Assistant works:
+    1. **User Interface**: You enter your query and select a market
+    2. **Processing Pipeline**: The system analyzes your request
+    3. **Document Analysis**: Relevant documents are found and processed
+    4. **Answer Generation**: A comprehensive answer is created using only information from the documents
+    """)
+    
+    # Add usage instructions
+    st.markdown("---")
+    st.markdown("""
+    ## How to use this tool
+    1. Enter your query about automotive regulations
+    2. Either select a specific market or let the system detect it
+    3. Click "Process Query" to start the analysis
+    4. The system will identify relevant documents from regulatory databases and provide an accurate answer based on their content only
+    
+    ## Example queries
+    - "What are the crash test requirements for passenger vehicles in the US?"
+    - "Explain the emission standards for electric vehicles in the EU"
+    - "What are the approval procedures for importing vehicles to Australia?"
+    """)
+
+# Run the application
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        st.error(f"Critical error in application startup: {str(e)}")
+        logger.exception("Critical application error")
