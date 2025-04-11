@@ -385,7 +385,7 @@ REGULATORY_WEBSITES = {
     
     "🇨🇳 China Ministry of Industry and Information Technology (MIIT)" : "www.miit.gov.cn/​",
     
-    "🇮🇳 India Automotive Research Association of India (ARAI)" "www.araiindia.com​",
+    "🇮🇳 India Automotive Research Association of India (ARAI)" : "www.araiindia.com​",
     
     "Central Motor Vehicle Rules (CMVR)" : "www.morth.nic.in​",
     
