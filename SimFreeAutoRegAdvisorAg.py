@@ -184,7 +184,7 @@ def create_diagram_image():
     # Node positions for better spacing and no overlaps
     nodes = {
         "User Input": {"pos": (0, 2)},
-        "Market Selection": {"pos": (0, 0)},
+        "Market & Source Detection": {"pos": (0, 0)},
         "Process Query": {"pos": (2, 1)},
         "Initialize Agent": {"pos": (4, 1)},
         "Processing Pipeline": {"pos": (6, 1)},
@@ -202,7 +202,7 @@ def create_diagram_image():
     # Enhanced node colors with better contrast
     node_colors = {
         "User Input": "#b8e0a1",          # Deeper green
-        "Market Selection": "#b8e0a1",     # Deeper green
+        "Market & Source Detection": "#b8e0a1",     # Deeper green
         "Process Query": "#b8e0a1",        # Deeper green
         "Initialize Agent": "#a7c8f7",     # Deeper blue
         "Processing Pipeline": "#a7c8f7",  # Deeper blue
@@ -216,7 +216,7 @@ def create_diagram_image():
     # Edges
     edges = [
         ("User Input", "Process Query"),
-        ("Market Selection", "Process Query"),
+        ("Market & Source Detection", "Process Query"),
         ("Process Query", "Initialize Agent"),
         ("Initialize Agent", "Processing Pipeline"),
         ("Processing Pipeline", "Document Analysis"),
@@ -226,6 +226,7 @@ def create_diagram_image():
     
     # Special edges to avoid label overlaps
     special_edges = [
+        ("Llama Gen-AI LLM", "Process Query"),
         ("Llama Gen-AI LLM", "Processing Pipeline"),
         ("Llama Gen-AI LLM", "Document Analysis"),
         ("Llama Gen-AI LLM", "Generate Answer"),
@@ -253,6 +254,7 @@ def create_diagram_image():
     
     # Draw special edges (dashed lines) with curved paths to avoid nodes
     edge_styles = {
+        ("Llama Gen-AI LLM", "Process Query"): {'rad': 0.3, 'style': 'dashed', 'color': 'gray'},
         ("Llama Gen-AI LLM", "Processing Pipeline"): {'rad': 0.3, 'style': 'dashed', 'color': 'gray'},
         ("Llama Gen-AI LLM", "Document Analysis"): {'rad': 0.2, 'style': 'dashed', 'color': 'gray'},
         ("Llama Gen-AI LLM", "Generate Answer"): {'rad': 0.4, 'style': 'dashed', 'color': 'gray'},
@@ -354,17 +356,7 @@ def initialize_groq_client():
         logger.error(f"Failed to initialize Groq client: {str(e)}")
         return None
 
-# Updated automotive regulatory websites with error handling
-# REGULATORY_WEBSITES = {
-#    "US": "https://www.nhtsa.gov/laws-regulations/fmvss",
-#    "EU": "https://unece.org/transport/vehicle-regulations",
-#    "China": "https://www.cccauthorization.com/ccc-certification/automotive-regulations",
-#    "India": "https://bis.gov.in/index.php/standards/technical-department/transport-engineering/",
-#    "Australia": "https://www.infrastructure.gov.au/infrastructure-transport-vehicles/vehicles/vehicle-design-regulation/australian-design-rules"
-#}
-
 REGULATORY_WEBSITES = {
-
     "Global & Regional Authorities UNECE" : "www.unece.org/trans/main/wp29/wp29regs.html​",
     
     "EU European Commission" : "ec.europa.eu/transport/home_en​",
@@ -408,41 +400,117 @@ REGULATORY_WEBSITES = {
     "🇬🇧 United Kingdom Department for Transport (DfT)" : "www.gov.uk/government/organisations/department-for-transport",
 }
 
+# Create a mapping of countries/regions to their respective sources
+def create_market_to_sources_mapping():
+    """Create a mapping of markets to their respective regulatory sources."""
+    market_to_sources = {}
+    
+    # Define market identification patterns
+    market_patterns = {
+        "Global": ["Global", "International", "UNECE", "ISO", "IEC"],
+        "US": ["🇺🇸", "US", "United States", "NHTSA", "EPA"],
+        "EU": ["🇪🇺", "EU", "European", "ACEA", "EFTA"],
+        "UK": ["🇬🇧", "UK", "United Kingdom", "DfT"],
+        "China": ["🇨🇳", "China", "MIIT"],
+        "India": ["🇮🇳", "India", "ARAI", "CMVR"],
+        "Japan": ["🇯🇵", "Japan", "MLIT"],
+        "Canada": ["🇨🇦", "Canada"],
+        "Australia": ["🇦🇺", "Australia"],
+        "Brazil": ["🇧🇷", "Brazil", "INMETRO"],
+        "South Korea": ["🇰🇷", "Korea", "MOLIT"],
+        "Russia": ["🇷🇺", "Russia", "Rosavtodor"],
+        "Mexico": ["🇲🇽", "Mexico", "SCT"],
+        "South Africa": ["🇿🇦", "South Africa", "NRCS"],
+        "Argentina": ["🇦🇷", "Argentina", "ANSV"]
+    }
+    
+    # Categorize each source by market
+    for source, url in REGULATORY_WEBSITES.items():
+        assigned = False
+        for market, patterns in market_patterns.items():
+            if any(pattern in source for pattern in patterns):
+                if market not in market_to_sources:
+                    market_to_sources[market] = []
+                market_to_sources[market].append(source)
+                assigned = True
+                break
+        
+        # If not assigned to any specific market, put in "Other"
+        if not assigned:
+            if "Other" not in market_to_sources:
+                market_to_sources["Other"] = []
+            market_to_sources["Other"].append(source)
+    
+    return market_to_sources
 
 # Define state operations
-def get_market(query, client):
-    """Determine which market to look for regulatory documents."""
-    logger.info("Starting market determination...")
+def get_market_and_source(query, client):
+    """Determine which market and regulatory source to use based on the query."""
+    logger.info("Starting market and source determination...")
+    
+    # Create a formatted list of all available regulatory sources
+    source_list = ""
+    for source, url in REGULATORY_WEBSITES.items():
+        source_list += f"- {source}: {url}\n"
     
     prompt = f"""
-    Based on the following query, determine which automotive regulatory market the user is interested in (US, EU, China, India, or Australia).
-    If the market is not clear, respond with "UNCLEAR".
+    Based on the following query about automotive regulations, determine:
+    1. Which market (country/region) the user is interested in
+    2. Which regulatory source would be most relevant to answer their query
+
+    User query: {query}
     
-    Query: {query}
+    Available regulatory sources:
+    {source_list}
     
-    Return only the market name or "UNCLEAR" without any additional text.
+    Respond in the following format:
+    MARKET: [market name or "UNCLEAR"]
+    SOURCE: [exact name of the most relevant regulatory source from the list above or "NONE" if unclear]
+    
+    If the market is unclear, respond with:
+    MARKET: UNCLEAR
+    SOURCE: NONE
     """
     
     try:
-        # Call LLM to determine market
-        logger.info("Calling LLM to determine market...")
+        # Call LLM to determine market and source
+        logger.info("Calling LLM to determine market and source...")
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=10
+            max_tokens=100
         )
         
-        market = response.choices[0].message.content.strip()
-        logger.info(f"Market determined: {market}")
+        result_text = response.choices[0].message.content.strip()
+        logger.info(f"LLM response: {result_text}")
         
-        if market not in REGULATORY_WEBSITES and market != "UNCLEAR":
-            logger.warning(f"LLM returned invalid market: {market}")
-            market = "UNCLEAR"
-            
-        return market
+        # Parse the response
+        market = "UNCLEAR"
+        source = "NONE"
+        
+        lines = result_text.split('\n')
+        for line in lines:
+            if line.startswith("MARKET:"):
+                market = line.replace("MARKET:", "").strip()
+            elif line.startswith("SOURCE:"):
+                source = line.replace("SOURCE:", "").strip()
+        
+        # Validate source is in our list
+        if source != "NONE" and source not in REGULATORY_WEBSITES:
+            # Try to find a close match
+            for key in REGULATORY_WEBSITES.keys():
+                if source in key or key in source:
+                    source = key
+                    break
+            else:
+                logger.warning(f"LLM returned invalid source: {source}")
+                source = "NONE"
+                
+        logger.info(f"Market determined: {market}, Source: {source}")
+        return market, source
     except Exception as e:
-        logger.error(f"Error determining market: {str(e)}")
-        return "UNCLEAR"
+        logger.error(f"Error determining market and source: {str(e)}")
+        return "UNCLEAR", "NONE"
 
 def extract_pdf_links(url, query, client):
     """Extract PDF links from the regulatory website."""
@@ -709,13 +777,14 @@ def analyze_content(query, pdf_contents, client):
         logger.error(f"Error generating final answer: {str(e)}")
         return "I apologize, but I encountered an error while processing your query. Please try again or rephrase your question."
 
-def process_query(query, market=None, client=None):
+def process_query(query, market=None, source=None, client=None):
     """Process a query using the simplified agent."""
-    logger.info(f"Processing query: {query}, market: {market or 'Auto-detect'}")
+    logger.info(f"Processing query: {query}, market: {market or 'Auto-detect'}, source: {source or 'Auto-detect'}")
     
     results = {
         "query": query,
         "market": market,
+        "source": source,
         "selected_url": "",
         "pdf_urls": [],
         "pdf_contents": {},
@@ -728,29 +797,38 @@ def process_query(query, market=None, client=None):
         results["final_answer"] = "I apologize, but I couldn't connect to the AI service. Please try again later."
         return results
     
-    # Step 2: Determine market if not provided
-    if not market:
-        logger.info("Determining market...")
-        results["market"] = get_market(query, client)
-        if results["market"] == "UNCLEAR":
-            logger.warning("Could not determine market automatically")
-            results["final_answer"] = "I couldn't determine which market's regulations you're interested in. Please select a specific market (US, EU, China, India, or Australia) and try again."
+    # Step 2: Determine market and source if not provided
+    if not source:
+        logger.info("Determining market and source...")
+        determined_market, determined_source = get_market_and_source(query, client)
+        
+        # If market was provided but source wasn't, keep the provided market
+        if market and not source:
+            results["source"] = determined_source
+        # If neither was provided, use both determined values
+        elif not market and not source:
+            results["market"] = determined_market
+            results["source"] = determined_source
+        
+        if results["source"] == "NONE":
+            logger.warning("Could not determine source automatically")
+            results["final_answer"] = "I couldn't determine which regulatory source would be most relevant for your query. Please select a specific source and try again."
             return results
     
-    # Step 3: Select URL
-    if results["market"] in REGULATORY_WEBSITES:
-        results["selected_url"] = REGULATORY_WEBSITES[results["market"]]
+    # Step 3: Select URL based on the source
+    if results["source"] in REGULATORY_WEBSITES:
+        results["selected_url"] = REGULATORY_WEBSITES[results["source"]]
         logger.info(f"Selected URL: {results['selected_url']}")
     else:
-        logger.warning(f"Market {results['market']} not found in regulatory websites")
-        results["final_answer"] = f"I apologize, but I don't have information on regulations for '{results['market']}'. Please select one of the available markets: US, EU, China, India, or Australia."
+        logger.warning(f"Source {results['source']} not found in regulatory websites")
+        results["final_answer"] = f"I apologize, but I don't have information on the regulatory source '{results['source']}'. Please select one of the available sources."
         return results
     
     # Step 4: Extract PDF links
     results["pdf_urls"] = extract_pdf_links(results["selected_url"], query, client)
     if not results["pdf_urls"]:
         logger.warning("No relevant PDF links found")
-        results["final_answer"] = "I couldn't find any relevant regulatory documents for your query. Please try a different query or select a different market."
+        results["final_answer"] = "I couldn't find any relevant regulatory documents for your query. Please try a different query or select a different source."
         return results
     
     # Step 5: Download and process PDFs
@@ -801,17 +879,46 @@ def main():
     # User query
     query = st.text_input("Enter your automotive regulatory query:")
     
-    # Market selection
-    market_options = list(REGULATORY_WEBSITES.keys())
-    selected_market = st.selectbox("Select a market (or let the system detect it):", ["Auto-detect"] + market_options)
+    # Create market-to-sources mapping
+    market_to_sources = create_market_to_sources_mapping()
+    
+    # Market and source selection
+    st.subheader("Market and Source Selection")
+    st.markdown("You can let the system automatically detect the market and relevant regulatory source, or select them manually.")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Sort markets with Global first and Other last
+        sorted_markets = sorted(market_to_sources.keys())
+        if "Global" in sorted_markets:
+            sorted_markets.remove("Global")
+            sorted_markets.insert(0, "Global")
+        if "Other" in sorted_markets:
+            sorted_markets.remove("Other")
+            sorted_markets.append("Other")
+        
+        # Market selection dropdown
+        market_options = ["Auto-detect"] + sorted_markets
+        selected_market = st.selectbox("Select Market:", market_options)
+    
+    with col2:
+        # Source selection dropdown, filtered by market
+        if selected_market == "Auto-detect":
+            source_options = ["Auto-detect"]
+        else:
+            source_options = ["Auto-detect"] + market_to_sources.get(selected_market, [])
+        
+        selected_source = st.selectbox("Select Regulatory Source:", source_options)
     
     if st.button("Process Query"):
         if query:
             with st.spinner("Processing your query..."):
                 logger.info(f"Processing query: {query}")
                 
-                # Set market if manually selected
+                # Set market and source if manually selected
                 market = None if selected_market == "Auto-detect" else selected_market
+                source = None if selected_source == "Auto-detect" else selected_source
                 
                 # Get user IP for diagnostic logging (anonymized)
                 user_ip = get_client_ip()
@@ -819,7 +926,7 @@ def main():
                 
                 # Process the query
                 try:
-                    result = process_query(query, market, client)
+                    result = process_query(query, market, source, client)
                     
                     # Log the session
                     accessed_documents = [title for title, _ in result.get("pdf_urls", [])]
@@ -834,24 +941,32 @@ def main():
                     # Display results
                     st.subheader("Results")
                     
-                    # Display the market
-                    if result["market"] and result["market"] != "UNCLEAR":
+                    # Display the market and source
+                    if result.get("market") and result["market"] != "UNCLEAR":
                         st.write(f"Market: {result['market']}")
+                    
+                    if result.get("source") and result["source"] != "NONE":
+                        st.write(f"Regulatory Source: {result['source']}")
                     else:
-                        st.error("Could not determine market automatically. Please select a market.")
-                        selected_market = st.selectbox("Please select a market:", market_options, key="market_select_after_error")
-                        if st.button("Confirm Market", key="confirm_market_button"):
-                            result = process_query(query, selected_market, client)
-                            
-                            # Log the session again with updated market
-                            accessed_documents = [title for title, _ in result.get("pdf_urls", [])]
-                            diagnostic_logger.log_session(
-                                user_id=user_id,
-                                query=query,
-                                market=selected_market,
-                                accessed_documents=accessed_documents,
-                                answer=result.get("final_answer", "")
-                            )
+                        st.error("Could not determine relevant regulatory source automatically.")
+                        
+                        # Allow user to select a source if detection failed
+                        if result.get("market") and result["market"] != "UNCLEAR":
+                            source_options = market_to_sources.get(result["market"], [])
+                            if source_options:
+                                selected_source = st.selectbox("Please select a regulatory source:", source_options, key="source_select_after_error")
+                                if st.button("Confirm Source", key="confirm_source_button"):
+                                    result = process_query(query, result["market"], selected_source, client)
+                                    
+                                    # Log the session again with updated source
+                                    accessed_documents = [title for title, _ in result.get("pdf_urls", [])]
+                                    diagnostic_logger.log_session(
+                                        user_id=user_id,
+                                        query=query,
+                                        market=result.get("market", "UNKNOWN"),
+                                        accessed_documents=accessed_documents,
+                                        answer=result.get("final_answer", "")
+                                    )
                     
                     # Display URL
                     if result.get("selected_url"):
@@ -897,7 +1012,7 @@ def main():
                 diagram_image = create_diagram_image()
                 if diagram_image:
                     # Display the image
-                    st.image(diagram_image, caption="Automotive Regulations AI Process Flow", use_container_width=True)
+                    st.image(diagram_image, caption="Automotive Regulations AI Process Flow", use_column_width=True)
                     
                     # Add download option
                     img_str = get_image_base64(diagram_image)
@@ -911,8 +1026,8 @@ def main():
             # Fall back to text-based diagram
             st.code("""
             User Input → Process Query → Initialize Agent → Processing Pipeline → Document Analysis → Generate Answer
-                                                                ↑                      ↑                 ↑
-                                                           Groq LLM API connections (provides intelligence)
+                ↑                ↑                               ↑                      ↑                 ↑
+            Market & Source Detection                      Groq LLM API connections (provides intelligence)
                                                                 ↑                      ↑
                                                           Error Handling (monitors process)
                                                                                        ↓
@@ -923,9 +1038,9 @@ def main():
     st.markdown("""
     ### Diagram Explanation
     This diagram shows how the Automotive Regulatory Document Assistant works:
-    1. **User Interface**: You enter your query and select a market
-    2. **Processing Pipeline**: The system analyzes your request
-    3. **Document Analysis**: Relevant documents are found and processed
+    1. **User Interface**: You enter your query and the system automatically detects relevant market and source
+    2. **Processing Pipeline**: The system analyzes your request and identifies appropriate regulatory documents
+    3. **Document Analysis**: Relevant documents are found and processed to extract information
     4. **Answer Generation**: A comprehensive answer is created using only information from the documents
     """)
     
@@ -934,14 +1049,16 @@ def main():
     st.markdown("""
     ## How to use this tool
     1. Enter your query about automotive regulations
-    2. Either select a specific market or let the system detect it
+    2. Either let the system automatically detect the relevant market and regulatory source, or select them manually
     3. Click "Process Query" to start the analysis
     4. The system will identify relevant documents from regulatory databases and provide an accurate answer based on their content only
     
     ## Example queries
     - "What are the crash test requirements for passenger vehicles in the US?"
-    - "Explain the emission standards for electric vehicles in the EU"
-    - "What are the approval procedures for importing vehicles to Australia?"
+    - "What are emission standards for electric vehicles in the EU from 2023 onwards?"
+    - "Tell me about the latest safety regulations for autonomous vehicles in Japan"
+    - "What are the approval procedures for importing used vehicles to Australia?"
+    - "What kind of child restraint systems are required in China?"
     """)
 
 # Run the application
