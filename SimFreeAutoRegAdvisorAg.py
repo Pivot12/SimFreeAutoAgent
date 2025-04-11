@@ -448,11 +448,67 @@ def get_market_and_source(query, client):
     """Determine which market and regulatory source to use based on the query."""
     logger.info("Starting market and source determination...")
     
-    # Create a formatted list of all available regulatory sources
-    source_list = ""
-    for source, url in REGULATORY_WEBSITES.items():
-        source_list += f"- {source}: {url}\n"
+    # Extract explicit mentions of countries/regions first
+    market_keywords = {
+        "US": ["US", "USA", "United States", "America", "American", "NHTSA", "EPA", "DOT", "FMVSS", "Federal Motor Vehicle"],
+        "EU": ["EU", "Europe", "European Union", "European", "EC", "ECE", "ACEA", "WVTA", "Euro"],
+        "Global": ["Global", "International", "UNECE", "UN", "ISO", "IEC", "World", "Worldwide"],
+        "UK": ["UK", "United Kingdom", "Britain", "British", "England", "DfT"],
+        "China": ["China", "Chinese", "MIIT", "CCC", "GB standards"],
+        "India": ["India", "Indian", "ARAI", "CMVR", "Bharat"],
+        "Japan": ["Japan", "Japanese", "MLIT", "JASIC", "TRIAS"],
+        "Canada": ["Canada", "Canadian", "CMVSS"],
+        "Australia": ["Australia", "Australian", "ADR"],
+        "Brazil": ["Brazil", "Brazilian", "INMETRO", "CONTRAN"],
+        "South Korea": ["Korea", "Korean", "MOLIT", "KMVSS"],
+        "Russia": ["Russia", "Russian", "Rosavtodor", "Customs Union", "EAC"],
+        "Mexico": ["Mexico", "Mexican", "SCT", "NOM"],
+        "South Africa": ["South Africa", "South African", "NRCS", "SABS"],
+        "Argentina": ["Argentina", "Argentinian", "ANSV"]
+    }
     
+    # Direct match for market keywords in the query
+    detected_market = None
+    highest_match_count = 0
+    
+    for market, keywords in market_keywords.items():
+        match_count = sum(1 for keyword in keywords if keyword.lower() in query.lower())
+        # Also check for exact matches that might be a stronger signal
+        exact_matches = sum(3 for keyword in keywords if f" {keyword.lower()} " in f" {query.lower()} ")
+        
+        total_score = match_count + exact_matches
+        
+        if total_score > highest_match_count:
+            highest_match_count = total_score
+            detected_market = market
+    
+    # If we have a strong direct match, use it directly - avoid LLM for simple cases
+    if highest_match_count >= 2:
+        logger.info(f"Direct keyword match detected market: {detected_market}")
+        
+        # Now determine source based on the detected market
+        relevant_sources = []
+        for source in REGULATORY_WEBSITES.keys():
+            # Check if source name contains market name
+            if detected_market.lower() in source.lower():
+                relevant_sources.append(source)
+                
+        # For US fuel type queries, prioritize EPA and DOE
+        if detected_market == "US" and any(fuel_term in query.lower() for fuel_term in ["fuel", "gas", "alternative", "gasoline", "diesel"]):
+            for source in relevant_sources:
+                if "EPA" in source or "Department of Energy" in source:
+                    logger.info(f"Direct source match for US fuel query: {source}")
+                    return detected_market, source
+        
+        # If we found relevant sources, use the first one
+        if relevant_sources:
+            logger.info(f"Using first relevant source for {detected_market}: {relevant_sources[0]}")
+            return detected_market, relevant_sources[0]
+        
+        # If no sources found for market, just return the market and let the fallback mechanism handle it
+        return detected_market, "NONE"
+    
+    # If direct matching failed or wasn't strong enough, use the LLM
     prompt = f"""
     Based on the following query about automotive regulations, determine:
     1. Which market (country/region) the user is interested in
@@ -460,12 +516,11 @@ def get_market_and_source(query, client):
 
     User query: {query}
     
-    Available regulatory sources:
-    {source_list}
+    For US fuel type regulations, be sure to consider the US Environmental Protection Agency (EPA) and Department of Energy as they regulate vehicle fuels.
     
     Respond in the following format:
     MARKET: [market name or "UNCLEAR"]
-    SOURCE: [exact name of the most relevant regulatory source from the list above or "NONE" if unclear]
+    SOURCE: [exact name of the most relevant regulatory source or "NONE" if unclear]
     
     If the market is unclear, respond with:
     MARKET: UNCLEAR
@@ -499,7 +554,7 @@ def get_market_and_source(query, client):
         if source != "NONE" and source not in REGULATORY_WEBSITES:
             # Try to find a close match
             for key in REGULATORY_WEBSITES.keys():
-                if source in key or key in source:
+                if source.lower() in key.lower() or key.lower() in source.lower():
                     source = key
                     break
             else:
@@ -572,47 +627,55 @@ def extract_pdf_links(url, query, client):
         
         logger.info(f"Fetching content from {url}")
         
-        # Add request headers to mimic a browser
+        # Add comprehensive request headers to mimic a browser
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
+            'Referer': 'https://www.google.com/',  # Pretend we came from Google
+            'Cache-Control': 'max-age=0',
+            'TE': 'Trailers',
+            'DNT': '1'
         }
         
-        # Add more flexible error handling for the request
-        try:
-            response = requests.get(url, headers=headers, timeout=30)
-            response.raise_for_status()
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error fetching website {url}: {str(e)}")
-            
-            # Try an alternative URL format if this one failed
-            if url.startswith("https://www."):
-                alt_url = url.replace("https://www.", "https://")
-                logger.info(f"Trying alternative URL format: {alt_url}")
-                try:
-                    response = requests.get(alt_url, headers=headers, timeout=30)
-                    response.raise_for_status()
-                    url = alt_url  # Update URL if successful
-                    logger.info(f"Alternative URL successful: {alt_url}")
-                except requests.exceptions.RequestException as e2:
-                    logger.error(f"Alternative URL also failed: {str(e2)}")
-                    return []
-            elif url.startswith("https://"):
-                alt_url = "https://www." + url[8:]
-                logger.info(f"Trying alternative URL format: {alt_url}")
-                try:
-                    response = requests.get(alt_url, headers=headers, timeout=30)
-                    response.raise_for_status()
-                    url = alt_url  # Update URL if successful
-                    logger.info(f"Alternative URL successful: {alt_url}")
-                except requests.exceptions.RequestException as e2:
-                    logger.error(f"Alternative URL also failed: {str(e2)}")
-                    return []
-            else:
-                return []
+        session = requests.Session()
+        
+        # Try common URL variants if the original fails
+        urls_to_try = [
+            url,
+            url.replace("https://www.", "https://"),
+            "https://www." + url.replace("https://", "") if url.startswith("https://") else url,
+            # UNECE specific handling
+            url.replace("unece.org/trans/main/wp29/wp29regs.html", "unece.org/transport/vehicle-regulations-wp29") if "unece" in url else url,
+            "https://unece.org/transport/vehicle-regulations-wp29" if "unece" in url else url
+        ]
+        
+        response = None
+        successful_url = None
+        
+        for try_url in urls_to_try:
+            try:
+                logger.info(f"Attempting to access: {try_url}")
+                response = session.get(try_url, headers=headers, timeout=30)
+                
+                if response.status_code == 200:
+                    logger.info(f"Successfully accessed: {try_url}")
+                    successful_url = try_url
+                    break
+                    
+                logger.warning(f"Failed to access {try_url}: {response.status_code}")
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Error accessing {try_url}: {str(e)}")
+                continue
+                
+        if not response or response.status_code != 200:
+            logger.error(f"Failed to access any URL variant for {url}")
+            return []
+        
+        # Update the URL to the successful one
+        url = successful_url
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
@@ -665,14 +728,13 @@ def extract_pdf_links(url, query, client):
                     logger.info(f"Found PDF link: {title} - {full_url}")
                     
                 # If it's a publications page, we'll check it for more PDFs
-                elif is_publications_page:
+                elif is_publications_page and full_url != url:  # Avoid checking the same page
                     logger.info(f"Found publications page: {full_url}")
                     try:
                         # Don't check pages we've already visited to avoid loops
-                        if full_url != url:
-                            pub_response = requests.get(full_url, headers=headers, timeout=30)
-                            pub_response.raise_for_status()
-                            
+                        pub_response = session.get(full_url, headers=headers, timeout=30)
+                        
+                        if pub_response.status_code == 200:
                             pub_soup = BeautifulSoup(pub_response.text, 'html.parser')
                             pub_links = pub_soup.find_all('a')
                             
@@ -703,6 +765,8 @@ def extract_pdf_links(url, query, client):
                                     pub_title = pub_link.text.strip() if pub_link.text.strip() else os.path.basename(pub_href)
                                     pdf_links.append((pub_title, pub_full_url))
                                     logger.info(f"Found PDF link on publications page: {pub_title} - {pub_full_url}")
+                        else:
+                            logger.warning(f"Failed to access publications page {full_url}: {pub_response.status_code}")
                     except Exception as pub_error:
                         logger.error(f"Error processing publications page {full_url}: {str(pub_error)}")
         
@@ -761,39 +825,41 @@ def extract_pdf_links(url, query, client):
                 logger.info(f"Checking document section: {section_text} at {section_url}")
                 
                 try:
-                    section_response = requests.get(section_url, headers=headers, timeout=30)
-                    section_response.raise_for_status()
+                    section_response = session.get(section_url, headers=headers, timeout=30)
                     
-                    section_soup = BeautifulSoup(section_response.text, 'html.parser')
-                    section_links = section_soup.find_all('a')
-                    
-                    for link in section_links:
-                        href = link.get('href')
-                        if href and href.lower().endswith('.pdf'):
-                            # Process URL the same way as above
-                            if href.startswith(('http://', 'https://')):
-                                full_url = href
-                            elif href.startswith('/'):
-                                from urllib.parse import urlparse
-                                parsed_url = urlparse(section_url)
-                                base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
-                                full_url = base_url + href
-                            else:
-                                if section_url.endswith('/'):
-                                    full_url = section_url + href
-                                else:
-                                    last_slash = section_url.rfind('/')
-                                    if '.' in section_url[last_slash:]:  # URL points to a file
-                                        base_url = section_url[:last_slash+1]
-                                    else:  # URL points to a directory
-                                        base_url = section_url + ('/' if not section_url.endswith('/') else '')
+                    if section_response.status_code == 200:
+                        section_soup = BeautifulSoup(section_response.text, 'html.parser')
+                        section_links = section_soup.find_all('a')
+                        
+                        for link in section_links:
+                            href = link.get('href')
+                            if href and href.lower().endswith('.pdf'):
+                                # Process URL the same way as above
+                                if href.startswith(('http://', 'https://')):
+                                    full_url = href
+                                elif href.startswith('/'):
+                                    from urllib.parse import urlparse
+                                    parsed_url = urlparse(section_url)
+                                    base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
                                     full_url = base_url + href
-                            
-                            full_url = clean_url(full_url)
-                            
-                            title = link.text.strip() if link.text.strip() else os.path.basename(href)
-                            pdf_links.append((title, full_url))
-                            logger.info(f"Found PDF link on document section page: {title} - {full_url}")
+                                else:
+                                    if section_url.endswith('/'):
+                                        full_url = section_url + href
+                                    else:
+                                        last_slash = section_url.rfind('/')
+                                        if '.' in section_url[last_slash:]:  # URL points to a file
+                                            base_url = section_url[:last_slash+1]
+                                        else:  # URL points to a directory
+                                            base_url = section_url + ('/' if not section_url.endswith('/') else '')
+                                        full_url = base_url + href
+                                
+                                full_url = clean_url(full_url)
+                                
+                                title = link.text.strip() if link.text.strip() else os.path.basename(href)
+                                pdf_links.append((title, full_url))
+                                logger.info(f"Found PDF link on document section page: {title} - {full_url}")
+                    else:
+                        logger.warning(f"Failed to access document section {section_url}: {section_response.status_code}")
                 except Exception as section_error:
                     logger.error(f"Error checking document section {section_url}: {str(section_error)}")
         
