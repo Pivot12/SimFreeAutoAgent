@@ -403,7 +403,7 @@ REGULATORY_WEBSITES = {
     
     "🇿🇦 South Africa National Regulator for Compulsory Specifications (NRCS)" : "www.nrcs.org.za/​",
     
-    "🇦🇷 Argentina National Road Safety Agency (ANSV)" : "www.ansv.gob.ar/​:,
+    "🇦🇷 Argentina National Road Safety Agency (ANSV)" : "www.ansv.gob.ar/​",
     
     "🇬🇧 United Kingdom Department for Transport (DfT)" : "www.gov.uk/government/organisations/department-for-transport",
 }
