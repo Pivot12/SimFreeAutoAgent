@@ -559,8 +559,8 @@ def get_fallback_source(market):
     return valid_sources[0] if valid_sources else None
 
 def extract_pdf_links(url, query, client):
-    """Extract PDF links from the regulatory website."""
-    logger.info(f"Extracting PDF links from {url}...")
+    """Extract PDF links from the regulatory website by properly traversing the site structure."""
+    logger.info(f"Extracting real PDF links from {url}...")
     
     try:
         # Clean and validate the URL before using it
@@ -572,10 +572,19 @@ def extract_pdf_links(url, query, client):
         
         logger.info(f"Fetching content from {url}")
         
+        # Add request headers to mimic a browser
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+        }
+        
         # Add more flexible error handling for the request
         try:
-            response = requests.get(url, timeout=30)
-            response.raise_for_status()  # Raise exception for non-200 status codes
+            response = requests.get(url, headers=headers, timeout=30)
+            response.raise_for_status()
         except requests.exceptions.RequestException as e:
             logger.error(f"Error fetching website {url}: {str(e)}")
             
@@ -584,7 +593,7 @@ def extract_pdf_links(url, query, client):
                 alt_url = url.replace("https://www.", "https://")
                 logger.info(f"Trying alternative URL format: {alt_url}")
                 try:
-                    response = requests.get(alt_url, timeout=30)
+                    response = requests.get(alt_url, headers=headers, timeout=30)
                     response.raise_for_status()
                     url = alt_url  # Update URL if successful
                     logger.info(f"Alternative URL successful: {alt_url}")
@@ -595,7 +604,7 @@ def extract_pdf_links(url, query, client):
                 alt_url = "https://www." + url[8:]
                 logger.info(f"Trying alternative URL format: {alt_url}")
                 try:
-                    response = requests.get(alt_url, timeout=30)
+                    response = requests.get(alt_url, headers=headers, timeout=30)
                     response.raise_for_status()
                     url = alt_url  # Update URL if successful
                     logger.info(f"Alternative URL successful: {alt_url}")
@@ -610,15 +619,23 @@ def extract_pdf_links(url, query, client):
         # Find all links on the page
         links = soup.find_all('a')
         
-        # Extract PDF links
+        # Extract direct PDF links first
         pdf_links = []
         for link in links:
             href = link.get('href')
-            if href and href.endswith('.pdf'):
-                # Clean the URL and ensure it's absolute
-                if href.startswith(('http://', 'https://')):
-                    full_url = href
-                else:
+            if not href:
+                continue
+                
+            # Check if this is a PDF or a publications page
+            is_pdf = href.lower().endswith('.pdf')
+            is_publications_page = any(keyword in href.lower() for keyword in 
+                                        ['publication', 'document', 'regulation', 'standard', 
+                                         'directive', 'legislation', 'report', 'guideline'])
+            
+            if is_pdf or is_publications_page:
+                # Make sure we have absolute URLs
+                full_url = href
+                if not href.startswith(('http://', 'https://')):
                     # Handle relative URLs properly
                     if href.startswith('/'):
                         # Get base domain
@@ -631,183 +648,205 @@ def extract_pdf_links(url, query, client):
                         if url.endswith('/'):
                             full_url = url + href
                         else:
-                            full_url = url + '/' + href
+                            last_slash = url.rfind('/')
+                            if '.' in url[last_slash:]:  # URL points to a file
+                                base_url = url[:last_slash+1]
+                            else:  # URL points to a directory
+                                base_url = url + ('/' if not url.endswith('/') else '')
+                            full_url = base_url + href
                 
                 # Clean the URL
                 full_url = clean_url(full_url)
                 
-                if link.text:
-                    pdf_links.append((link.text.strip(), full_url))
+                # Add PDFs directly to our list
+                if is_pdf:
+                    title = link.text.strip() if link.text.strip() else os.path.basename(href)
+                    pdf_links.append((title, full_url))
+                    logger.info(f"Found PDF link: {title} - {full_url}")
+                    
+                # If it's a publications page, we'll check it for more PDFs
+                elif is_publications_page:
+                    logger.info(f"Found publications page: {full_url}")
+                    try:
+                        # Don't check pages we've already visited to avoid loops
+                        if full_url != url:
+                            pub_response = requests.get(full_url, headers=headers, timeout=30)
+                            pub_response.raise_for_status()
+                            
+                            pub_soup = BeautifulSoup(pub_response.text, 'html.parser')
+                            pub_links = pub_soup.find_all('a')
+                            
+                            for pub_link in pub_links:
+                                pub_href = pub_link.get('href')
+                                if pub_href and pub_href.lower().endswith('.pdf'):
+                                    # Process similarly to above
+                                    if pub_href.startswith(('http://', 'https://')):
+                                        pub_full_url = pub_href
+                                    elif pub_href.startswith('/'):
+                                        from urllib.parse import urlparse
+                                        parsed_url = urlparse(full_url)
+                                        base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
+                                        pub_full_url = base_url + pub_href
+                                    else:
+                                        if full_url.endswith('/'):
+                                            pub_full_url = full_url + pub_href
+                                        else:
+                                            last_slash = full_url.rfind('/')
+                                            if '.' in full_url[last_slash:]:  # URL points to a file
+                                                base_url = full_url[:last_slash+1]
+                                            else:  # URL points to a directory
+                                                base_url = full_url + ('/' if not full_url.endswith('/') else '')
+                                            pub_full_url = base_url + pub_href
+                                    
+                                    pub_full_url = clean_url(pub_full_url)
+                                    
+                                    pub_title = pub_link.text.strip() if pub_link.text.strip() else os.path.basename(pub_href)
+                                    pdf_links.append((pub_title, pub_full_url))
+                                    logger.info(f"Found PDF link on publications page: {pub_title} - {pub_full_url}")
+                    except Exception as pub_error:
+                        logger.error(f"Error processing publications page {full_url}: {str(pub_error)}")
         
         logger.info(f"Found {len(pdf_links)} PDF links")
         
         if not pdf_links:
             logger.warning("No PDF links found on the regulatory website")
             
-            # If no PDFs found directly, try checking for links to pages that might contain PDFs
-            potential_pdf_pages = []
+            # If no direct PDF links found, try to find links to publications or document sections
+            doc_section_links = []
             for link in links:
                 href = link.get('href')
-                text = link.text.lower().strip() if link.text else ""
+                text = link.text.lower() if link.text else ""
                 
-                # Keywords that might indicate pages with PDFs
-                pdf_indicators = ['regulation', 'standard', 'document', 'publication', 'pdf', 'download']
+                if not href:
+                    continue
+                    
+                # Keywords that might indicate document sections
+                doc_section_indicators = [
+                    'publication', 'document', 'library', 'resource', 'download',
+                    'regulation', 'directive', 'legislation', 'report', 'standard', 
+                    'guideline', 'technical', 'official', 'legal', 'policy'
+                ]
                 
-                if href and any(indicator in text for indicator in pdf_indicators):
+                if any(indicator in text or indicator in href.lower() for indicator in doc_section_indicators):
+                    # Process URL the same way as above
                     if href.startswith(('http://', 'https://')):
-                        potential_pdf_pages.append(href)
+                        full_url = href
                     elif href.startswith('/'):
                         from urllib.parse import urlparse
                         parsed_url = urlparse(url)
                         base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
-                        potential_pdf_pages.append(base_url + href)
+                        full_url = base_url + href
                     else:
                         if url.endswith('/'):
-                            potential_pdf_pages.append(url + href)
+                            full_url = url + href
                         else:
-                            potential_pdf_pages.append(url + '/' + href)
+                            last_slash = url.rfind('/')
+                            if '.' in url[last_slash:]:  # URL points to a file
+                                base_url = url[:last_slash+1]
+                            else:  # URL points to a directory
+                                base_url = url + ('/' if not url.endswith('/') else '')
+                            full_url = base_url + href
+                    
+                    full_url = clean_url(full_url)
+                    
+                    # Avoid adding the same URL twice
+                    if full_url not in [link for _, link in doc_section_links]:
+                        doc_section_links.append((text, full_url))
             
-            # Check a few of these pages for PDFs
-            for page_url in potential_pdf_pages[:3]:  # Limit to first 3 to avoid too many requests
+            # Check document sections for PDFs
+            for section_text, section_url in doc_section_links[:5]:  # Limit to first 5 to avoid too many requests
+                if section_url == url:  # Skip the current URL to avoid loops
+                    continue
+                    
+                logger.info(f"Checking document section: {section_text} at {section_url}")
+                
                 try:
-                    logger.info(f"Checking secondary page for PDFs: {page_url}")
-                    page_response = requests.get(page_url, timeout=30)
-                    page_response.raise_for_status()
+                    section_response = requests.get(section_url, headers=headers, timeout=30)
+                    section_response.raise_for_status()
                     
-                    page_soup = BeautifulSoup(page_response.text, 'html.parser')
-                    page_links = page_soup.find_all('a')
+                    section_soup = BeautifulSoup(section_response.text, 'html.parser')
+                    section_links = section_soup.find_all('a')
                     
-                    for link in page_links:
+                    for link in section_links:
                         href = link.get('href')
-                        if href and href.endswith('.pdf'):
-                            # Process similarly to above
+                        if href and href.lower().endswith('.pdf'):
+                            # Process URL the same way as above
                             if href.startswith(('http://', 'https://')):
                                 full_url = href
                             elif href.startswith('/'):
                                 from urllib.parse import urlparse
-                                parsed_url = urlparse(page_url)
+                                parsed_url = urlparse(section_url)
                                 base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
                                 full_url = base_url + href
                             else:
-                                if page_url.endswith('/'):
-                                    full_url = page_url + href
+                                if section_url.endswith('/'):
+                                    full_url = section_url + href
                                 else:
-                                    full_url = page_url + '/' + href
+                                    last_slash = section_url.rfind('/')
+                                    if '.' in section_url[last_slash:]:  # URL points to a file
+                                        base_url = section_url[:last_slash+1]
+                                    else:  # URL points to a directory
+                                        base_url = section_url + ('/' if not section_url.endswith('/') else '')
+                                    full_url = base_url + href
                             
                             full_url = clean_url(full_url)
                             
-                            if link.text:
-                                pdf_links.append((link.text.strip(), full_url))
-                            else:
-                                # Use filename if no text
-                                from os.path import basename
-                                filename = basename(href)
-                                pdf_links.append((filename, full_url))
-                                
-                except Exception as e:
-                    logger.error(f"Error checking secondary page {page_url}: {str(e)}")
-                    continue
-            
-            logger.info(f"Found {len(pdf_links)} PDF links after checking secondary pages")
-            
-            # If still no PDFs, try an alternative approach: simulate a search for PDFs
-            if not pdf_links:
-                # Look for a search box on the page
-                search_forms = soup.find_all('form')
-                has_search = False
-                
-                for form in search_forms:
-                    inputs = form.find_all('input')
-                    for input_tag in inputs:
-                        if input_tag.get('type') == 'search' or 'search' in str(form).lower():
-                            has_search = True
-                            break
-                
-                if has_search:
-                    logger.info("Site appears to have search capability, but we can't use it directly.")
-                
-                # Since we can't directly use the site's search, try a general approach:
-                # Construct some PDF filenames that might exist based on the query
-                
-                # Extract keywords from the query
-                keywords = [word.lower() for word in query.split() if len(word) > 3]
-                
-                # Generate some potential PDF names
-                potential_pdfs = []
-                
-                # Construct possible document URLs
-                from urllib.parse import urlparse
-                parsed_url = urlparse(url)
-                base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
-                
-                common_paths = [
-                    "/documents/", 
-                    "/publications/",
-                    "/regulations/",
-                    "/standards/",
-                    "/resources/"
-                ]
-                
-                for path in common_paths:
-                    for keyword in keywords:
-                        potential_pdfs.append(f"{base_url}{path}{keyword}.pdf")
-                        potential_pdfs.append(f"{base_url}{path}regulation_{keyword}.pdf")
-                        potential_pdfs.append(f"{base_url}{path}standard_{keyword}.pdf")
-                
-                # Try each potential PDF URL
-                for pdf_url in potential_pdfs:
-                    try:
-                        logger.info(f"Trying potential PDF URL: {pdf_url}")
-                        head_response = requests.head(pdf_url, timeout=10)
-                        
-                        if head_response.status_code == 200:
-                            pdf_links.append((f"Potential document about {' '.join(keywords)}", pdf_url))
-                            logger.info(f"Found potential PDF: {pdf_url}")
-                    except Exception:
-                        continue
+                            title = link.text.strip() if link.text.strip() else os.path.basename(href)
+                            pdf_links.append((title, full_url))
+                            logger.info(f"Found PDF link on document section page: {title} - {full_url}")
+                except Exception as section_error:
+                    logger.error(f"Error checking document section {section_url}: {str(section_error)}")
+        
+        logger.info(f"Total PDF links found: {len(pdf_links)}")
         
         if not pdf_links:
+            logger.warning("No PDF links found after checking all potential document sections")
             return []
         
-        # Use LLM to select relevant PDFs based on the query
-        prompt = f"""
-        Based on the user query: "{query}", select the most relevant PDF documents from the following list.
-        Return the indices of the selected documents (0-based) as a comma-separated list.
-        
-        PDFs:
-        {pd.DataFrame(pdf_links, columns=['Title', 'URL']).to_string()}
-        
-        Return only the indices as a comma-separated list, without any additional text.
-        If none of the documents seem relevant to the query, return "NONE".
-        """
-        
-        logger.info("Calling LLM to select relevant PDFs...")
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=100
-        )
-        
-        # Extract indices from response
-        indices_str = response.choices[0].message.content.strip()
-        logger.info(f"LLM response for PDF selection: {indices_str}")
-        
-        if indices_str == "NONE":
-            logger.warning("LLM determined no relevant PDFs for the query")
-            return []
-        
-        try:
-            indices = [int(idx.strip()) for idx in indices_str.split(',') if idx.strip().isdigit()]
+        # Use LLM to select relevant PDFs based on the query (only if we have too many PDFs)
+        if len(pdf_links) > 5:
+            prompt = f"""
+            Based on the user query: "{query}", select the most relevant PDF documents from the following list.
+            Return the indices of the selected documents (0-based) as a comma-separated list.
             
-            # Get selected PDFs
-            selected_pdfs = [pdf_links[idx] for idx in indices if idx < len(pdf_links)]
-            logger.info(f"Selected {len(selected_pdfs)} PDFs")
+            PDFs:
+            {pd.DataFrame(pdf_links, columns=['Title', 'URL']).to_string()}
             
-            return selected_pdfs
-        except Exception as e:
-            logger.error(f"Error parsing LLM response for PDF selection: {str(e)}")
-            # Return a subset of PDFs if parsing fails
-            return pdf_links[:3] if pdf_links else []
+            Return only the indices as a comma-separated list, without any additional text.
+            If none of the documents seem relevant to the query, return "NONE".
+            """
+            
+            logger.info("Calling LLM to select relevant PDFs...")
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=100
+            )
+            
+            # Extract indices from response
+            indices_str = response.choices[0].message.content.strip()
+            logger.info(f"LLM response for PDF selection: {indices_str}")
+            
+            if indices_str == "NONE":
+                logger.warning("LLM determined no relevant PDFs for the query")
+                # Return a few PDFs anyway since we found them on the site
+                return pdf_links[:3]
+            
+            try:
+                indices = [int(idx.strip()) for idx in indices_str.split(',') if idx.strip().isdigit()]
+                
+                # Get selected PDFs
+                selected_pdfs = [pdf_links[idx] for idx in indices if idx < len(pdf_links)]
+                logger.info(f"Selected {len(selected_pdfs)} PDFs based on relevance")
+                
+                return selected_pdfs if selected_pdfs else pdf_links[:3]
+            except Exception as e:
+                logger.error(f"Error parsing LLM response for PDF selection: {str(e)}")
+                # Return a subset of PDFs if parsing fails
+                return pdf_links[:3]
+        else:
+            # If we have a reasonable number of PDFs, just return all of them
+            return pdf_links
     
     except requests.exceptions.RequestException as e:
         logger.error(f"Error fetching website {url}: {str(e)}")
