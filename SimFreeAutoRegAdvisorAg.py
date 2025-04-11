@@ -377,7 +377,7 @@ REGULATORY_WEBSITES = {
     
     "🇺🇸 United States - National Highway Traffic Safety Administration (NHTSA)" : "www.nhtsa.gov​",
     
-    "US Environmental Protection Agency (EPA) – Vehicle Regulations" : "www.epa.gov/vehicl"e-and-engine-certification​",
+    "US Environmental Protection Agency (EPA) – Vehicle Regulations" : "www.epa.gov/vehicle-and-engine-certification​",
     
     "European Free Trade Association (EFTA) – Vehicle Regulations" : "www.efta.int/eea/eea-legal-order/transport​",
     
