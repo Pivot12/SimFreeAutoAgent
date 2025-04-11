@@ -826,91 +826,9 @@ def download_and_process_pdfs(pdf_urls):
         try:
             logger.info(f"Downloading PDF: {title} from {url}")
             
-            # Skip example URLs that would lead to hallucination
+            # Skip example URLs completely - NO synthetic content generation
             if "example.org" in url or "example.com" in url:
                 logger.warning(f"Skipping example URL: {url}")
-                
-                # Since this is a simulated URL, we'll generate synthetic content based on the title
-                # This is only for demonstration purposes in a development environment
-                
-                logger.info(f"Generating synthetic content for example URL: {url}")
-                
-                # Extract keywords from title to create relevant synthetic content
-                keywords = [word.lower() for word in title.split() if len(word) > 3 and word.lower() not in ['and', 'the', 'for', 'from']]
-                
-                # Generate different types of content based on title keywords
-                if any(kw in title.lower() for kw in ['requirement', 'standard', 'regulation']):
-                    synthetic_text = f"""
-                    # {title}
-                    
-                    ## Introduction
-                    This document outlines the regulatory requirements for automotive vehicles in accordance with the latest standards and specifications.
-                    
-                    ## Key Requirements
-                    
-                    ### 1. Safety Standards
-                    All vehicles must comply with safety standards including crash test requirements, seatbelt specifications, and airbag deployment mechanisms.
-                    
-                    ### 2. Emissions and Environmental Regulations
-                    Vehicles must meet emission standards for exhaust gases including CO2, NOx, and particulate matter. Electric vehicles have specific requirements for battery disposal and recycling.
-                    
-                    ### 3. Technical Specifications
-                    Technical requirements include braking systems, lighting, and electronic stability control. Autonomous vehicles have additional requirements for sensor systems and control algorithms.
-                    """
-                
-                elif any(kw in title.lower() for kw in ['guide', 'manual', 'handbook']):
-                    synthetic_text = f"""
-                    # {title}
-                    
-                    ## Purpose
-                    This guide provides information on navigating the regulatory landscape for automotive manufacturers and importers.
-                    
-                    ## How to Use This Guide
-                    This document is organized by vehicle category and includes references to relevant standards and regulations.
-                    
-                    ## Vehicle Categories
-                    
-                    ### Passenger Vehicles
-                    Passenger vehicles include cars, SUVs, and minivans designed primarily for personal transportation.
-                    
-                    ### Commercial Vehicles
-                    Commercial vehicles include trucks, buses, and specialty vehicles designed for business or industrial use.
-                    
-                    ### Alternative Fuel Vehicles
-                    Alternative fuel vehicles include electric, hybrid, hydrogen, and natural gas powered vehicles.
-                    """
-                
-                else:
-                    synthetic_text = f"""
-                    # {title}
-                    
-                    ## Overview
-                    This document provides information on automotive regulatory considerations that must be addressed by manufacturers, importers, and distributors.
-                    
-                    ## Regulatory Framework
-                    The framework includes federal regulations, state/provincial requirements, and international standards that may apply to vehicle design, manufacturing, and operation.
-                    
-                    ## Compliance Process
-                    
-                    ### Testing and Certification
-                    Vehicles must undergo testing procedures to verify compliance with safety, emissions, and performance standards.
-                    
-                    ### Documentation Requirements
-                    Manufacturers must maintain comprehensive documentation of compliance testing, material specifications, and design validation.
-                    
-                    ### Reporting Obligations
-                    Regular reporting to regulatory authorities is required to maintain compliance status and address any identified issues.
-                    """
-                
-                # Add title-specific content
-                for keyword in keywords:
-                    synthetic_text += f"\n\n## {keyword.title()} Specific Requirements\n"
-                    synthetic_text += f"The requirements related to {keyword} include specifications for design, testing, and certification to ensure compliance with applicable standards."
-                
-                # Add this synthetic content to our PDF contents
-                pdf_contents[title] = synthetic_text
-                successful_downloads += 1
-                logger.info(f"Generated synthetic content for: {title}, {len(synthetic_text)} characters")
                 continue
                 
             # Clean the URL before using it
@@ -1026,7 +944,6 @@ def download_and_process_pdfs(pdf_urls):
                     
                     # If no text could be extracted, the PDF might be scanned/image-based
                     # In a production system, you would use OCR here
-                    # For now, we'll just note this
                     logger.info(f"PDF may be image-based, OCR would be needed: {title}")
             except Exception as e:
                 logger.error(f"Error reading PDF {title}: {str(e)}")
@@ -1039,9 +956,27 @@ def download_and_process_pdfs(pdf_urls):
     
     return pdf_contents
 
-def analyze_content(query, pdf_contents, client):
-    """Analyze PDF content and generate answer with factual verification."""
-    logger.info("Analyzing content...")
+import time
+import importlib.util
+
+# Add token counting functionality - check if tiktoken is available
+def get_token_count(text, model="llama-3.3-70b-versatile"):
+    """Estimate token count for text using tiktoken if available, or a simple approximation."""
+    if importlib.util.find_spec("tiktoken"):
+        import tiktoken
+        try:
+            encoder = tiktoken.encoding_for_model(model)
+            return len(encoder.encode(text))
+        except Exception:
+            # Fallback to approximation if tiktoken fails
+            pass
+    
+    # Simple approximation: 1 token ≈ 4 characters
+    return len(text) // 4
+
+def analyze_content_with_token_management(query, pdf_contents, client):
+    """Analyze PDF content and generate answer with token limit management."""
+    logger.info("Analyzing content with token management...")
     
     # Check if we have any PDF contents to analyze
     if not pdf_contents:
@@ -1057,18 +992,21 @@ def analyze_content(query, pdf_contents, client):
     try:
         from langchain.text_splitter import RecursiveCharacterTextSplitter
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=30000,  # Adjust based on token limit
+            chunk_size=5000,  # Smaller chunks to stay well under token limit
             chunk_overlap=200,
-            length_function=len,
+            length_function=get_token_count,
         )
         chunks = text_splitter.split_text(combined_text)
     except ImportError:
         # Manual fallback text splitting if langchain is not available
         chunks = []
-        max_chunk_size = 30000
+        max_token_size = 5000  # Maximum tokens per chunk
         current_chunk = ""
         for line in combined_text.split("\n"):
-            if len(current_chunk) + len(line) + 1 <= max_chunk_size:
+            line_tokens = get_token_count(line)
+            chunk_tokens = get_token_count(current_chunk)
+            
+            if chunk_tokens + line_tokens <= max_token_size:
                 current_chunk += line + "\n"
             else:
                 chunks.append(current_chunk)
@@ -1081,8 +1019,15 @@ def analyze_content(query, pdf_contents, client):
     # Process chunks and collect insights with citations
     insights = []
     
+    # Token management variables
+    tokens_per_minute_limit = 6000
+    tokens_used_in_minute = 0
+    minute_start_time = time.time()
+    
     for i, chunk in enumerate(chunks):
         logger.info(f"Processing chunk {i+1}/{len(chunks)}")
+        
+        # Estimate tokens for this request
         prompt = f"""
         I'm analyzing automotive regulatory documents to answer a user's query.
         
@@ -1104,6 +1049,27 @@ def analyze_content(query, pdf_contents, client):
         Be strict about only including insights with direct evidence from the documents.
         """
         
+        # Calculate tokens for this prompt
+        estimated_prompt_tokens = get_token_count(prompt)
+        estimated_response_tokens = 1000  # Estimate for response
+        estimated_total_tokens = estimated_prompt_tokens + estimated_response_tokens
+        
+        # Check if we need to reset the minute counter
+        current_time = time.time()
+        if current_time - minute_start_time >= 60:
+            tokens_used_in_minute = 0
+            minute_start_time = current_time
+        
+        # Check if adding this request would exceed our limit
+        if tokens_used_in_minute + estimated_total_tokens > tokens_per_minute_limit:
+            # Calculate wait time needed to stay under limit
+            wait_seconds = 60 - (current_time - minute_start_time)
+            if wait_seconds > 0:
+                logger.info(f"Approaching token limit, waiting {wait_seconds:.1f} seconds before continuing")
+                time.sleep(wait_seconds)
+                tokens_used_in_minute = 0
+                minute_start_time = time.time()
+        
         try:
             logger.info(f"Calling LLM for chunk {i+1} analysis...")
             response = client.chat.completions.create(
@@ -1113,12 +1079,42 @@ def analyze_content(query, pdf_contents, client):
             )
             chunk_insights = response.choices[0].message.content
             
+            # Update token usage
+            tokens_used = estimated_prompt_tokens + get_token_count(chunk_insights)
+            tokens_used_in_minute += tokens_used
+            logger.info(f"Used approximately {tokens_used} tokens for chunk {i+1}")
+            
             # Only add if there are actually insights found
             if "NO RELEVANT INFORMATION FOUND IN THIS CHUNK" not in chunk_insights:
                 insights.append(chunk_insights)
             logger.info(f"Successfully analyzed chunk {i+1}")
         except Exception as e:
             logger.error(f"Error processing chunk {i+1}: {str(e)}")
+            # If we hit a rate limit, wait and retry
+            if "rate_limit_exceeded" in str(e) or "Request too large" in str(e):
+                logger.info("Hit rate limit, waiting 60 seconds before retrying")
+                time.sleep(60)
+                tokens_used_in_minute = 0
+                minute_start_time = time.time()
+                
+                try:
+                    # Retry the request with a shorter chunk if possible
+                    shortened_chunk = chunk[:len(chunk)//2] + "..."
+                    shortened_prompt = prompt.replace(chunk, shortened_chunk)
+                    
+                    response = client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=[{"role": "user", "content": shortened_prompt}],
+                        max_tokens=500  # Reduced token limit for retry
+                    )
+                    chunk_insights = response.choices[0].message.content
+                    
+                    # Only add if there are actually insights found
+                    if "NO RELEVANT INFORMATION FOUND IN THIS CHUNK" not in chunk_insights:
+                        insights.append(chunk_insights)
+                    logger.info(f"Successfully analyzed chunk {i+1} (shortened) on retry")
+                except Exception as retry_error:
+                    logger.error(f"Error on retry for chunk {i+1}: {str(retry_error)}")
     
     # If no insights found at all, return a "no answer" response
     if not insights:
@@ -1127,6 +1123,21 @@ def analyze_content(query, pdf_contents, client):
     
     # Combine insights and generate final answer with factual verification
     combined_insights = "\n\n".join(insights)
+    
+    # Reset token counter before final answer generation
+    current_time = time.time()
+    if current_time - minute_start_time >= 60:
+        tokens_used_in_minute = 0
+        minute_start_time = current_time
+    
+    # Wait if needed to avoid rate limits
+    if tokens_used_in_minute > tokens_per_minute_limit * 0.7:  # If we're at 70% of the limit, wait
+        wait_seconds = 60 - (current_time - minute_start_time)
+        if wait_seconds > 0:
+            logger.info(f"Waiting {wait_seconds:.1f} seconds before generating final answer")
+            time.sleep(wait_seconds)
+        tokens_used_in_minute = 0
+        minute_start_time = time.time()
     
     prompt = f"""
     Based on the following insights extracted from automotive regulatory documents, provide a comprehensive answer to the user's query.
@@ -1146,6 +1157,25 @@ def analyze_content(query, pdf_contents, client):
     
     Provide a well-structured, accurate, and factual answer focusing ONLY on what's present in the automotive regulations documents.
     """
+    
+    # Check if final prompt would exceed token limit
+    final_prompt_tokens = get_token_count(prompt)
+    if final_prompt_tokens > tokens_per_minute_limit - 2000:  # Leaving room for response
+        # Truncate combined insights to fit within limits
+        max_insights_tokens = tokens_per_minute_limit - 4000  # Reserve tokens for prompt template and response
+        truncated_insights = ""
+        total_tokens = 0
+        
+        for insight in insights:
+            insight_tokens = get_token_count(insight)
+            if total_tokens + insight_tokens <= max_insights_tokens:
+                truncated_insights += insight + "\n\n"
+                total_tokens += insight_tokens
+            else:
+                break
+        
+        # Recreate prompt with truncated insights
+        prompt = prompt.replace(combined_insights, truncated_insights + "\n[Note: Some insights were truncated due to length constraints]")
     
     try:
         logger.info("Generating final answer...")
@@ -1169,6 +1199,50 @@ def analyze_content(query, pdf_contents, client):
         return final_answer
     except Exception as e:
         logger.error(f"Error generating final answer: {str(e)}")
+        
+        # If we hit token limits, try with a smaller prompt
+        if "rate_limit_exceeded" in str(e) or "Request too large" in str(e):
+            logger.info("Hit rate limit with final answer, trying with shortened insights")
+            time.sleep(60)  # Wait a minute to reset rate limits
+            
+            # Create a shorter version with just 1-2 most relevant insights
+            shortened_insights = ""
+            if insights:
+                shortened_insights = insights[0]
+                if len(insights) > 1:
+                    shortened_insights += "\n\n[Additional insights omitted due to length constraints]"
+            
+            shortened_prompt = f"""
+            Based on the following insights extracted from automotive regulatory documents, provide a concise answer to the user's query.
+            
+            User query: {query}
+            
+            Key insight from documents:
+            {shortened_insights}
+            
+            Important instructions:
+            1. Your answer MUST be derived ONLY from the document insights provided above
+            2. Include citations to the specific document source for each claim
+            3. Keep your answer brief and focused on the most relevant information
+            4. Do not make claims not supported by the document evidence
+            5. Format citations as: [Source Document Name]
+            
+            Provide a factual answer focusing ONLY on what's present in the automotive regulations documents.
+            """
+            
+            try:
+                response = client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[{"role": "user", "content": shortened_prompt}],
+                    max_tokens=1000
+                )
+                final_answer = response.choices[0].message.content
+                logger.info("Generated shortened final answer successfully")
+                return final_answer
+            except Exception as retry_error:
+                logger.error(f"Error generating shortened final answer: {str(retry_error)}")
+                return "I apologize, but I encountered an error while processing your query. Please try again with a more specific question or select a different regulatory source."
+        
         return "I apologize, but I encountered an error while processing your query. Please try again or rephrase your question."
 
 def process_query(query, market=None, source=None, client=None):
@@ -1290,73 +1364,8 @@ def process_query(query, market=None, source=None, client=None):
     
     if not results["pdf_urls"]:
         logger.warning("No relevant PDF links found after all attempts")
-        
-        # Try one more approach: direct web search for documents
-        logger.info("Attempting direct search for relevant PDFs")
-        
-        # Construct search terms based on query and market/source
-        search_terms = []
-        
-        if results["market"] and results["market"] != "UNCLEAR":
-            search_terms.append(f"{results['market']} automotive regulations {query} filetype:pdf")
-        else:
-            search_terms.append(f"automotive regulations {query} filetype:pdf")
-        
-        # Try each search term
-        for term in search_terms:
-            logger.info(f"Searching for: {term}")
-            try:
-                # This would typically use a web search API, but for simplicity, 
-                # let's simulate finding a few relevant PDFs based on the search term
-                
-                # In a real implementation, you would use a search API like Google, Bing, etc.
-                # For now, we'll just create some examples
-                
-                # Extract keywords from the search term
-                keywords = [word for word in term.split() if len(word) > 3 and word.lower() not in ['filetype', 'automotive', 'regulations']]
-                
-                simulated_pdfs = []
-                
-                # Create "simulated" PDF links that might be relevant
-                if results["market"] and results["market"] != "UNCLEAR":
-                    market_name = results["market"]
-                    simulated_pdfs.append((
-                        f"{market_name} Automotive Regulatory Requirements", 
-                        f"https://example.org/regulations/{market_name.lower()}_automotive_requirements.pdf"
-                    ))
-                    simulated_pdfs.append((
-                        f"Guide to {market_name} Vehicle Standards", 
-                        f"https://example.org/guides/vehicle_standards_{market_name.lower()}.pdf"
-                    ))
-                else:
-                    simulated_pdfs.append((
-                        "International Automotive Regulatory Requirements", 
-                        "https://example.org/regulations/international_automotive_requirements.pdf"
-                    ))
-                
-                # Add keyword-specific PDFs
-                for keyword in keywords:
-                    simulated_pdfs.append((
-                        f"Regulations on {keyword.title()} for Automotive Industry", 
-                        f"https://example.org/regulations/{keyword.lower()}_regulations.pdf"
-                    ))
-                
-                # In a real implementation, we would validate these URLs
-                # For now, we'll just use these simulated results
-                
-                # Add these to our PDF URLs
-                results["pdf_urls"] = simulated_pdfs
-                
-                if simulated_pdfs:
-                    logger.info(f"Found {len(simulated_pdfs)} potential PDFs through search")
-                    break
-            except Exception as e:
-                logger.error(f"Error performing search: {str(e)}")
-        
-        # If we still don't have PDFs, return an appropriate message
-        if not results["pdf_urls"]:
-            results["final_answer"] = "I couldn't find any relevant regulatory documents for your query across multiple sources. Please try a different query with more specific terms related to automotive regulations."
-            return results
+        results["final_answer"] = "I couldn't find any relevant regulatory documents for your query. Please try a different query with more specific terms related to automotive regulations."
+        return results
     
     # Step 5: Download and process PDFs
     results["pdf_contents"] = download_and_process_pdfs(results["pdf_urls"])
@@ -1382,7 +1391,7 @@ def process_query(query, market=None, source=None, client=None):
             # Clean up the text (remove excess whitespace, etc.)
             text_content = re.sub(r'\s+', ' ', text_content).strip()
             
-            # Create a simulated "PDF content" from the website text
+            # Create a content from the website text
             if text_content:
                 results["pdf_contents"] = {
                     f"Website content from {results['source']}": text_content
@@ -1396,8 +1405,8 @@ def process_query(query, market=None, source=None, client=None):
             results["final_answer"] = "I couldn't successfully download or extract content from the regulatory documents. Please try again later or with a different query."
             return results
     
-    # Step 6: Analyze content and generate answer
-    results["final_answer"] = analyze_content(query, results["pdf_contents"], client)
+    # Step 6: Analyze content and generate answer with token limit management
+    results["final_answer"] = analyze_content_with_token_management(query, results["pdf_contents"], client)
     
     return results
 
