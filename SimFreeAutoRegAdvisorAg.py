@@ -365,87 +365,47 @@ def initialize_groq_client():
 
 REGULATORY_WEBSITES = {
 
-    "Global & Regional Authorities
-    UNECE World Forum for Harmonization of Vehicle Regulations (WP.29)
-    Oversees international vehicle regulations, including safety, emissions, and performance standards" : "www.unece.org/trans/main/wp29/wp29regs.html​",
+    "Global & Regional Authorities UNECE" : "www.unece.org/trans/main/wp29/wp29regs.html​",
     
-    "European Commission – Mobility and Transport
-    Develops and enforces vehicle regulations within the European Union." : "ec.europa.eu/transport/home_en​",
+    "EU European Commission" : "ec.europa.eu/transport/home_en​",
     
-    "European Automobile Manufacturers' Association (ACEA)
-    Provides a comprehensive regulatory guide for the automotive industry." : "ACEA Regulatory Guide 2023​",
+    "European Automobile Manufacturers' Association (ACEA)" : "ACEA Regulatory Guide 2023​",
     
-    "International Organization for Standardization (ISO) – Road Vehicles
-    Develops international standards for road vehicles." : "www.iso.org/committee/45306.html​",
+    "International Organization for Standardization (ISO) – Road Vehicles" : "www.iso.org/committee/45306.html​",
     
-    "International Electrotechnical Commission (IEC) – Road Vehicles
-    Develops international standards for electrical and electronic technologies in vehicles." : "www.iec.ch/standardsdev/publications/standards.htm​",
+    "International Electrotechnical Commission (IEC) – Road Vehicles" : "www.iec.ch/standardsdev/publications/standards.htm​",
     
-    "🇺🇸 United States
-    National Highway Traffic Safety Administration (NHTSA)
-    Regulates vehicle safety standards and compliance." : "www.nhtsa.gov​",
+    "🇺🇸 United States - National Highway Traffic Safety Administration (NHTSA)" : "www.nhtsa.gov​",
     
-    Environmental Protection Agency (EPA) – Vehicle Regulations
-    Oversees vehicle emissions standards and certification." : "www.epa.gov/vehicl"e-and-engine-certification​",
+    "US Environmental Protection Agency (EPA) – Vehicle Regulations" : "www.epa.gov/vehicl"e-and-engine-certification​",
     
-    "🇪🇺 European Union
-    European Commission – Mobility and Transport
-    Develops and enforces vehicle regulations within the EU." : "ec.europa.eu/transport/home_en​",
+    "European Free Trade Association (EFTA) – Vehicle Regulations" : "www.efta.int/eea/eea-legal-order/transport​",
     
-    "European Free Trade Association (EFTA) – Vehicle Regulations
-    Provides vehicle regulations for EFTA member countries." : "www.efta.int/eea/eea-legal-order/transport​",
+    "🇯🇵 Japan Ministry of Land, Infrastructure, Transport and Tourism (MLIT)" : "www.mlit.go.jp/en/road/index.html​",
     
-    "🇯🇵 Japan
-    Ministry of Land, Infrastructure, Transport and Tourism (MLIT)
-    Regulates vehicle safety and environmental standards." : "www.mlit.go.jp/en/road/index.html​",
+    "🇨🇳 China Ministry of Industry and Information Technology (MIIT)" : "www.miit.gov.cn/​",
     
-    "🇨🇳 China
-    Ministry of Industry and Information Technology (MIIT)
-    Oversees vehicle manufacturing standards and regulations." : "www.miit.gov.cn/​",
+    "🇮🇳 India Automotive Research Association of India (ARAI)" "www.araiindia.com​",
     
-    "🇮🇳 India
-    Automotive Research Association of India (ARAI)
-    Provides vehicle certification and homologation services." "www.araiindia.com​",
-    homologation.co
+    "Central Motor Vehicle Rules (CMVR)" : "www.morth.nic.in​",
     
-    "Central Motor Vehicle Rules (CMVR)
-    Governs vehicle standards and regulations in India." : "www.morth.nic.in​",
+    "🇨🇦 Canada Transport Canada – Motor Vehicle Safety" : "tc.canada.ca/en/road-transportation/motor-vehicle-safety​",
     
-    "🇨🇦 Canada
-    Transport Canada – Motor Vehicle Safety
-    Regulates vehicle safety standards and compliance." : "tc.canada.ca/en/road-transportation/motor-vehicle-safety​",
+    "🇦🇺 Australia Vehicle Standards" : "www.infrastructure.gov.au/vehicles/vehicle-standards​",
     
-    "🇦🇺 Australia
-    Department of Infrastructure, Transport, Regional Development and Communications – Vehicle Standards
-    Oversees vehicle standards and regulations." : "www.infrastructure.gov.au/vehicles/vehicle-standards​",
+    "🇧🇷 Brazil National Institute of Metrology, Quality and Technology (INMETRO)" : "www.gov.br/inmetro/pt-br​",
     
-    "🇧🇷 Brazil
-    National Institute of Metrology, Quality and Technology (INMETRO)
-    Regulates vehicle safety and quality standards." : "www.gov.br/inmetro/pt-br​",
+    "🇰🇷 South Korea Ministry of Land, Infrastructure and Transport (MOLIT)" : "www.molit.go.kr/english/​",
     
-    "🇰🇷 South Korea
-    Ministry of Land, Infrastructure and Transport (MOLIT)
-    Oversees vehicle safety and environmental standards." : "www.molit.go.kr/english/​",
+    "🇷🇺 Russia Federal Road Agency (Rosavtodor)" : "www.rosavtodor.ru/en/​",
     
-    "🇷🇺 Russia
-    Federal Road Agency (Rosavtodor)
-    Regulates vehicle infrastructure and standards." : "www.rosavtodor.ru/en/​",
+    "🇲🇽 Mexico Secretariat of Communications and Transportation (SCT)" : "www.gob.mx/sct​",
     
-    "🇲🇽 Mexico
-    Secretariat of Communications and Transportation (SCT)
-    Oversees vehicle regulations and standards." : "www.gob.mx/sct​",
+    "🇿🇦 South Africa National Regulator for Compulsory Specifications (NRCS)" : "www.nrcs.org.za/​",
     
-    "🇿🇦 South Africa
-    National Regulator for Compulsory Specifications (NRCS)
-    Regulates vehicle safety and quality standards." : "www.nrcs.org.za/​",
+    "🇦🇷 Argentina National Road Safety Agency (ANSV)" : "www.ansv.gob.ar/​:,
     
-    "🇦🇷 Argentina
-    National Road Safety Agency (ANSV)
-    Oversees vehicle safety and compliance standards." : "www.ansv.gob.ar/​:,
-    
-    "🇬🇧 United Kingdom
-    Department for Transport (DfT)
-    Regulates vehicle safety and environmental standards." : "www.gov.uk/government/organisations/department-for-transport",
+    "🇬🇧 United Kingdom Department for Transport (DfT)" : "www.gov.uk/government/organisations/department-for-transport",
 }
 
 
