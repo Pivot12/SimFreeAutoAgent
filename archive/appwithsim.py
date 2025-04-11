@@ -1,4 +1,4 @@
-# pip install streamlit requests PyPDF2 beautifulsoup4 pandas groq langgraph langchain-groq
+""" # pip install streamlit requests PyPDF2 beautifulsoup4 pandas groq langgraph langchain-groq
 import os
 import re
 import base64
@@ -818,3 +818,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    """
