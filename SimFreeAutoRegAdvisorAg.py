@@ -355,13 +355,99 @@ def initialize_groq_client():
         return None
 
 # Updated automotive regulatory websites with error handling
+# REGULATORY_WEBSITES = {
+#    "US": "https://www.nhtsa.gov/laws-regulations/fmvss",
+#    "EU": "https://unece.org/transport/vehicle-regulations",
+#    "China": "https://www.cccauthorization.com/ccc-certification/automotive-regulations",
+#    "India": "https://bis.gov.in/index.php/standards/technical-department/transport-engineering/",
+#    "Australia": "https://www.infrastructure.gov.au/infrastructure-transport-vehicles/vehicles/vehicle-design-regulation/australian-design-rules"
+#}
+
 REGULATORY_WEBSITES = {
-    "US": "https://www.nhtsa.gov/laws-regulations/fmvss",
-    "EU": "https://unece.org/transport/vehicle-regulations",
-    "China": "https://www.cccauthorization.com/ccc-certification/automotive-regulations",
-    "India": "https://bis.gov.in/index.php/standards/technical-department/transport-engineering/",
-    "Australia": "https://www.infrastructure.gov.au/infrastructure-transport-vehicles/vehicles/vehicle-design-regulation/australian-design-rules"
+
+    "Global & Regional Authorities
+    UNECE World Forum for Harmonization of Vehicle Regulations (WP.29)
+    Oversees international vehicle regulations, including safety, emissions, and performance standards" : "www.unece.org/trans/main/wp29/wp29regs.html​",
+    
+    "European Commission – Mobility and Transport
+    Develops and enforces vehicle regulations within the European Union." : "ec.europa.eu/transport/home_en​",
+    
+    "European Automobile Manufacturers' Association (ACEA)
+    Provides a comprehensive regulatory guide for the automotive industry." : "ACEA Regulatory Guide 2023​",
+    
+    "International Organization for Standardization (ISO) – Road Vehicles
+    Develops international standards for road vehicles." : "www.iso.org/committee/45306.html​",
+    
+    "International Electrotechnical Commission (IEC) – Road Vehicles
+    Develops international standards for electrical and electronic technologies in vehicles." : "www.iec.ch/standardsdev/publications/standards.htm​",
+    
+    "🇺🇸 United States
+    National Highway Traffic Safety Administration (NHTSA)
+    Regulates vehicle safety standards and compliance." : "www.nhtsa.gov​",
+    
+    Environmental Protection Agency (EPA) – Vehicle Regulations
+    Oversees vehicle emissions standards and certification." : "www.epa.gov/vehicl"e-and-engine-certification​",
+    
+    "🇪🇺 European Union
+    European Commission – Mobility and Transport
+    Develops and enforces vehicle regulations within the EU." : "ec.europa.eu/transport/home_en​",
+    
+    "European Free Trade Association (EFTA) – Vehicle Regulations
+    Provides vehicle regulations for EFTA member countries." : "www.efta.int/eea/eea-legal-order/transport​",
+    
+    "🇯🇵 Japan
+    Ministry of Land, Infrastructure, Transport and Tourism (MLIT)
+    Regulates vehicle safety and environmental standards." : "www.mlit.go.jp/en/road/index.html​",
+    
+    "🇨🇳 China
+    Ministry of Industry and Information Technology (MIIT)
+    Oversees vehicle manufacturing standards and regulations." : "www.miit.gov.cn/​",
+    
+    "🇮🇳 India
+    Automotive Research Association of India (ARAI)
+    Provides vehicle certification and homologation services." "www.araiindia.com​",
+    homologation.co
+    
+    "Central Motor Vehicle Rules (CMVR)
+    Governs vehicle standards and regulations in India." : "www.morth.nic.in​",
+    
+    "🇨🇦 Canada
+    Transport Canada – Motor Vehicle Safety
+    Regulates vehicle safety standards and compliance." : "tc.canada.ca/en/road-transportation/motor-vehicle-safety​",
+    
+    "🇦🇺 Australia
+    Department of Infrastructure, Transport, Regional Development and Communications – Vehicle Standards
+    Oversees vehicle standards and regulations." : "www.infrastructure.gov.au/vehicles/vehicle-standards​",
+    
+    "🇧🇷 Brazil
+    National Institute of Metrology, Quality and Technology (INMETRO)
+    Regulates vehicle safety and quality standards." : "www.gov.br/inmetro/pt-br​",
+    
+    "🇰🇷 South Korea
+    Ministry of Land, Infrastructure and Transport (MOLIT)
+    Oversees vehicle safety and environmental standards." : "www.molit.go.kr/english/​",
+    
+    "🇷🇺 Russia
+    Federal Road Agency (Rosavtodor)
+    Regulates vehicle infrastructure and standards." : "www.rosavtodor.ru/en/​",
+    
+    "🇲🇽 Mexico
+    Secretariat of Communications and Transportation (SCT)
+    Oversees vehicle regulations and standards." : "www.gob.mx/sct​",
+    
+    "🇿🇦 South Africa
+    National Regulator for Compulsory Specifications (NRCS)
+    Regulates vehicle safety and quality standards." : "www.nrcs.org.za/​",
+    
+    "🇦🇷 Argentina
+    National Road Safety Agency (ANSV)
+    Oversees vehicle safety and compliance standards." : "www.ansv.gob.ar/​:,
+    
+    "🇬🇧 United Kingdom
+    Department for Transport (DfT)
+    Regulates vehicle safety and environmental standards." : "www.gov.uk/government/organisations/department-for-transport",
 }
+
 
 # Define state operations
 def get_market(query, client):
