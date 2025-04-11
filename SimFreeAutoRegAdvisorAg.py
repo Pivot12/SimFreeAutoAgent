@@ -176,41 +176,38 @@ class GitHubLogger:
             return False
 
 # Diagram Image Creation
-def create_diagram_image():
-    """Create a diagram image using NetworkX and Matplotlib"""
+def create_polished_diagram():
+    """Create a polished process flow diagram using NetworkX and Matplotlib"""
     try:
-        # Create a graph
+        # Create a directed graph
         G = nx.DiGraph()
-        # Add nodes with positions for a more controlled layout
-        nodes = {
-            "User Input": {"pos": (0, 0)},
-            "Market Selection": {"pos": (0, -1)},
-            "Process Query": {"pos": (1, -0.5)},
-            "Initialize Agent": {"pos": (2, -0.5)},
-            "Processing Pipeline": {"pos": (3, -0.5)},
-            "Document Analysis": {"pos": (4, -0.5)},
-            "Generate Answer": {"pos": (5, -0.5)},
-            "Groq LLM API": {"pos": (3, -2)},
-            "PDF Processing": {"pos": (4, -1.5)},
-            "Error Handling": {"pos": (2, -2)}
+        
+        # Define node positions with better spacing to avoid overlaps
+        positions = {
+            "User Input": (0, 4),
+            "Market Selection": (0, 2),
+            "Process Query": (3, 3),
+            "Initialize Agent": (6, 3),
+            "Processing Pipeline": (9, 3),
+            "Document Analysis": (12, 3),
+            "Generate Answer": (15, 3),
+            "Groq LLM API": (9, 0),
+            "PDF Processing": (12, 1),
+            "Error Handling": (6, 0),
         }
-        # Add all nodes
-        for node, attrs in nodes.items():
-            G.add_node(node, **attrs)
-        # Define node colors by category
-        node_colors = {
-            "User Input": "#d0f0c0",
-            "Market Selection": "#d0f0c0",
-            "Process Query": "#d0f0c0",
-            "Initialize Agent": "#c5daf9",
-            "Processing Pipeline": "#c5daf9",
-            "Document Analysis": "#c5daf9",
-            "Generate Answer": "#c5daf9",
-            "Groq LLM API": "#f9d6c5",
-            "PDF Processing": "#c5daf9",
-            "Error Handling": "#f9c5c5"
-        }
-        # Add edges (connections)
+        
+        # Add nodes with positions
+        for node, pos in positions.items():
+            G.add_node(node, pos=pos)
+            
+        # Define node categories for coloring
+        ui_nodes = ["User Input", "Market Selection"]
+        core_nodes = ["Process Query", "Initialize Agent", "Processing Pipeline", 
+                      "Document Analysis", "Generate Answer", "PDF Processing"]
+        service_nodes = ["Groq LLM API"]
+        utility_nodes = ["Error Handling"]
+        
+        # Define edges with proper connections
         edges = [
             ("User Input", "Process Query"),
             ("Market Selection", "Process Query"),
@@ -218,58 +215,96 @@ def create_diagram_image():
             ("Initialize Agent", "Processing Pipeline"),
             ("Processing Pipeline", "Document Analysis"),
             ("Document Analysis", "Generate Answer"),
+            ("Document Analysis", "PDF Processing"),
+            ("PDF Processing", "Document Analysis"),
+        ]
+        
+        # Add special edges (dashed lines) for services and utilities
+        dashed_edges = [
             ("Groq LLM API", "Processing Pipeline"),
             ("Groq LLM API", "Document Analysis"),
             ("Groq LLM API", "Generate Answer"),
-            ("Document Analysis", "PDF Processing"),
             ("Error Handling", "Processing Pipeline"),
-            ("Error Handling", "Document Analysis")
+            ("Error Handling", "Document Analysis"),
         ]
+        
+        # Add all edges to the graph
         G.add_edges_from(edges)
-        # Create figure with a white background
-        plt.figure(figsize=(10, 6), facecolor='white')
-        # Get node positions
+        G.add_edges_from(dashed_edges)
+        
+        # Create the figure with high DPI and large size for clarity
+        plt.figure(figsize=(14, 8), dpi=150, facecolor='white')
+        
+        # Get node positions from the graph
         pos = nx.get_node_attributes(G, 'pos')
-        # Draw nodes with custom colors
-        for node, color in node_colors.items():
-            nx.draw_networkx_nodes(G, pos, nodelist=[node], node_color=color,
-                                  node_size=2500, edgecolors='black')
+        
+        # Draw nodes with custom styling by category
+        nx.draw_networkx_nodes(G, pos, nodelist=ui_nodes, node_color="#d0f0c0", 
+                              node_size=3000, alpha=1, edgecolors='black', linewidths=2)
+        nx.draw_networkx_nodes(G, pos, nodelist=core_nodes, node_color="#c5daf9", 
+                              node_size=3000, alpha=1, edgecolors='black', linewidths=2)
+        nx.draw_networkx_nodes(G, pos, nodelist=service_nodes, node_color="#f9d6c5", 
+                              node_size=3000, alpha=1, edgecolors='black', linewidths=2)
+        nx.draw_networkx_nodes(G, pos, nodelist=utility_nodes, node_color="#f9c5c5", 
+                              node_size=3000, alpha=1, edgecolors='black', linewidths=2)
+        
         # Draw regular edges (solid lines)
-        regular_edges = [(u, v) for u, v in edges if u not in ["Groq LLM API", "Error Handling"]]
-        nx.draw_networkx_edges(G, pos, edgelist=regular_edges, arrows=True, arrowsize=20,
-                              width=1.5, edge_color='black')
+        nx.draw_networkx_edges(G, pos, edgelist=edges, width=2, edge_color='black',
+                              arrowsize=25, arrowstyle='->', connectionstyle='arc3,rad=0.1')
+        
         # Draw special edges (dashed lines)
-        special_edges = [(u, v) for u, v in edges if u in ["Groq LLM API", "Error Handling"]]
-        nx.draw_networkx_edges(G, pos, edgelist=special_edges, arrows=True, arrowsize=20,
-                              width=1.5, edge_color='gray', style='dashed')
-        # Add labels with white background for better readability
-        label_options = {"fc": "white", "alpha": 0.8, "bbox": {"pad": 5, "boxstyle": "round"}}
-        nx.draw_networkx_labels(G, pos, font_size=10, font_weight='bold', bbox=label_options)
-        # Remove axes
+        nx.draw_networkx_edges(G, pos, edgelist=dashed_edges, width=2, 
+                              edge_color='gray', style='dashed', arrowsize=20, 
+                              arrowstyle='->', connectionstyle='arc3,rad=-0.1')
+        
+        # Create text background boxes for better readability
+        text_boxes = {node: {"bbox": {"boxstyle": "round,pad=0.5", 
+                                     "facecolor": "white", 
+                                     "alpha": 0.8, 
+                                     "edgecolor": "#00000044"}} 
+                     for node in G.nodes()}
+        
+        # Draw node labels with background boxes to avoid overlaps
+        nx.draw_networkx_labels(G, pos, font_size=11, font_weight='bold', 
+                                labels={n: n for n in G.nodes()},
+                                bbox=text_boxes)
+        
+        # Add a legend for node categories
+        legend_elements = [
+            plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#d0f0c0', 
+                      markersize=15, label='User Interface'),
+            plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#c5daf9', 
+                      markersize=15, label='Core Processing'),
+            plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#f9d6c5', 
+                      markersize=15, label='External API'),
+            plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#f9c5c5', 
+                      markersize=15, label='Error Handling'),
+            plt.Line2D([0], [0], color='black', lw=2, label='Direct Flow'),
+            plt.Line2D([0], [0], color='gray', lw=2, linestyle='--', label='Support Flow')
+        ]
+        plt.legend(handles=legend_elements, loc='upper center', 
+                  bbox_to_anchor=(0.5, 0.05), ncol=3, fontsize=10)
+        
+        # Add a title
+        plt.title('Automotive Regulations AI Agent Process Flow', 
+                 fontsize=16, fontweight='bold', pad=20)
+        
+        # Remove axes and tight layout
         plt.axis('off')
         plt.tight_layout()
-        # Save the plot to a BytesIO object
+        
+        # Save the figure to a BytesIO object
         buffer = BytesIO()
-        plt.savefig(buffer, format='png', dpi=120, bbox_inches='tight')
-        buffer.seek(0)
+        plt.savefig(buffer, format='png', bbox_inches='tight')
         plt.close()
-        # Create image from buffer
+        buffer.seek(0)
+        
+        # Create and return PIL Image
         image = Image.open(buffer)
         return image
+        
     except Exception as e:
         logger.error(f"Error creating diagram: {str(e)}")
-        return None
-
-# Function to get base64 encoded image for embedded display
-def get_image_base64(image):
-    """Convert PIL image to base64 for HTML embedding"""
-    try:
-        buffered = BytesIO()
-        image.save(buffered, format="PNG")
-        img_str = base64.b64encode(buffered.getvalue()).decode()
-        return img_str
-    except Exception as e:
-        logger.error(f"Error encoding image: {str(e)}")
         return None
 
 # Function to get client IP address
@@ -803,33 +838,33 @@ def main():
     
     # Create a collapsible section for the diagram
     with st.expander("Click to view the application architecture diagram"):
-        # Try to display the diagram
-        try:
-            # Generate diagram image
-            with st.spinner("Generating diagram image..."):
-                diagram_image = create_diagram_image()
-                if diagram_image:
-                    # Display the image
-                    st.image(diagram_image, caption="Application Architecture", use_column_width=True)
-                    # Add download option
-                    img_str = get_image_base64(diagram_image)
-                    if img_str:
-                        href = f'<a href="data:image/png;base64,{img_str}" download="regulatory_agent_diagram.png">Download Diagram Image</a>'
-                        st.markdown(href, unsafe_allow_html=True)
-                else:
-                    st.error("Could not generate diagram image")
-        except Exception as e:
-            st.error(f"Error displaying diagram: {str(e)}")
-            # Text-only fallback
-            st.code("""
-            User Input → Process Query → Initialize Agent → Processing Pipeline → Document Analysis → Generate Answer
-                                                                ↑                      ↑                 ↑
-                                                           Groq LLM API connections (provides intelligence)
-                                                                ↑                      ↑
-                                                          Error Handling (monitors process)
-                                                                                       ↓
-                                                                                PDF Processing
-            """)
+    try:
+        # Generate polished diagram image
+        with st.spinner("Generating process flow diagram..."):
+            diagram_image = create_polished_diagram()
+            if diagram_image:
+                # Display the image
+                st.image(diagram_image, caption="Automotive Regulations AI Process Flow", use_column_width=True)
+                
+                # Add download option
+                img_str = get_image_base64(diagram_image)
+                if img_str:
+                    href = f'<a href="data:image/png;base64,{img_str}" download="auto_regs_process_flow.png">Download Diagram</a>'
+                    st.markdown(href, unsafe_allow_html=True)
+            else:
+                raise Exception("Failed to generate diagram")
+    except Exception as e:
+        st.error(f"Could not generate diagram: {str(e)}")
+        # Fall back to text-based diagram
+        st.code("""
+        User Input → Process Query → Initialize Agent → Processing Pipeline → Document Analysis → Generate Answer
+                                                            ↑                      ↑                 ↑
+                                                       Groq LLM API connections (provides intelligence)
+                                                            ↑                      ↑
+                                                      Error Handling (monitors process)
+                                                                                   ↓
+                                                                            PDF Processing
+        """)
     
     # Explanation of the diagram
     st.markdown("""
