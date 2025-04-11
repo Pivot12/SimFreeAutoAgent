@@ -444,128 +444,202 @@ def create_market_to_sources_mapping():
     return market_to_sources
 
 # Define state operations
-def get_market_and_source(query, client):
-    """Determine which market and regulatory source to use based on the query."""
-    logger.info("Starting market and source determination...")
+def enhanced_market_detection(query, client):
+    """
+    Enhanced market detection using NLP techniques and a multi-stage approach.
     
-    # Extract explicit mentions of countries/regions first
-    market_keywords = {
-        "US": ["US", "USA", "United States", "America", "American", "NHTSA", "EPA", "DOT", "FMVSS", "Federal Motor Vehicle"],
-        "EU": ["EU", "Europe", "European Union", "European", "EC", "ECE", "ACEA", "WVTA", "Euro"],
-        "Global": ["Global", "International", "UNECE", "UN", "ISO", "IEC", "World", "Worldwide"],
-        "UK": ["UK", "United Kingdom", "Britain", "British", "England", "DfT"],
-        "China": ["China", "Chinese", "MIIT", "CCC", "GB standards"],
-        "India": ["India", "Indian", "ARAI", "CMVR", "Bharat"],
-        "Japan": ["Japan", "Japanese", "MLIT", "JASIC", "TRIAS"],
-        "Canada": ["Canada", "Canadian", "CMVSS"],
-        "Australia": ["Australia", "Australian", "ADR"],
-        "Brazil": ["Brazil", "Brazilian", "INMETRO", "CONTRAN"],
-        "South Korea": ["Korea", "Korean", "MOLIT", "KMVSS"],
-        "Russia": ["Russia", "Russian", "Rosavtodor", "Customs Union", "EAC"],
-        "Mexico": ["Mexico", "Mexican", "SCT", "NOM"],
-        "South Africa": ["South Africa", "South African", "NRCS", "SABS"],
-        "Argentina": ["Argentina", "Argentinian", "ANSV"]
+    This function uses a combination of rule-based pattern matching, keyword analysis,
+    and LLM-based classification to determine the regulatory market with high accuracy.
+    """
+    logger.info("Starting enhanced market detection for query...")
+    
+    # Stage 1: Direct keyword matching with weighted scoring
+    market_patterns = {
+        "US": {
+            "aliases": ["US", "USA", "United States", "America", "American", "U.S.", "U.S.A."],
+            "agencies": ["NHTSA", "EPA", "DOT", "FMVSS", "Federal Motor Vehicle", "DOE", "CAFE"],
+            "regulations": ["CFR", "Title 49", "Part 571", "Federal Register"]
+        },
+        "EU": {
+            "aliases": ["EU", "Europe", "European Union", "European", "E.U."],
+            "agencies": ["EC", "ECE", "ACEA", "European Commission"],
+            "regulations": ["WVTA", "Euro NCAP", "Type Approval", "Euro", "Directive", "EC Regulation"]
+        },
+        "Global": {
+            "aliases": ["Global", "International", "Worldwide", "World"],
+            "agencies": ["UNECE", "UN", "United Nations", "ISO", "IEC", "WHO"],
+            "regulations": ["GTR", "Global Technical Regulation", "UN Regulation"]
+        },
+        "UK": {
+            "aliases": ["UK", "United Kingdom", "Britain", "British", "England", "U.K."],
+            "agencies": ["DfT", "DVSA", "VCA"],
+            "regulations": ["Type Approval", "SVA", "British Standard"]
+        },
+        "China": {
+            "aliases": ["China", "Chinese", "PRC"],
+            "agencies": ["MIIT", "CCC", "CATARC"],
+            "regulations": ["GB standard", "GB/T", "GB standards", "Chinese standard"]
+        },
+        "India": {
+            "aliases": ["India", "Indian"],
+            "agencies": ["ARAI", "CMVR", "BIS"],
+            "regulations": ["AIS", "Bharat", "IS"]
+        },
+        "Japan": {
+            "aliases": ["Japan", "Japanese"],
+            "agencies": ["MLIT", "JASIC", "JAMA"],
+            "regulations": ["TRIAS", "J-NCAP", "Japanese standard"]
+        },
+        "Canada": {
+            "aliases": ["Canada", "Canadian"],
+            "agencies": ["Transport Canada", "TC"],
+            "regulations": ["CMVSS", "Canadian Motor Vehicle"]
+        },
+        "Australia": {
+            "aliases": ["Australia", "Australian", "Aus", "AU"],
+            "agencies": ["ADR", "ANCAP"],
+            "regulations": ["Australian Design Rules", "Vehicle Standards"]
+        }
     }
     
-    # Direct match for market keywords in the query
-    detected_market = None
-    highest_match_count = 0
+    # Initialize scores for each market
+    market_scores = {market: 0 for market in market_patterns.keys()}
     
-    for market, keywords in market_keywords.items():
-        match_count = sum(1 for keyword in keywords if keyword.lower() in query.lower())
-        # Also check for exact matches that might be a stronger signal
-        exact_matches = sum(3 for keyword in keywords if f" {keyword.lower()} " in f" {query.lower()} ")
-        
-        total_score = match_count + exact_matches
-        
-        if total_score > highest_match_count:
-            highest_match_count = total_score
-            detected_market = market
+    # Create a normalized version of the query for matching
+    query_normalized = ' ' + query.lower() + ' '
     
-    # If we have a strong direct match, use it directly - avoid LLM for simple cases
-    if highest_match_count >= 2:
-        logger.info(f"Direct keyword match detected market: {detected_market}")
+    # Calculate scores based on keyword matches
+    for market, patterns in market_patterns.items():
+        # Check for country/region name matches (high weight)
+        for alias in patterns["aliases"]:
+            # Check for exact words with word boundaries
+            pattern = r'\b' + re.escape(alias.lower()) + r'\b'
+            matches = re.findall(pattern, query_normalized)
+            if matches:
+                # Exact market name is a strong signal
+                market_scores[market] += len(matches) * 10
+                logger.info(f"Found market alias match for {market}: {alias}")
         
-        # Now determine source based on the detected market
-        relevant_sources = []
-        for source in REGULATORY_WEBSITES.keys():
-            # Check if source name contains market name
-            if detected_market.lower() in source.lower():
-                relevant_sources.append(source)
-                
-        # For US fuel type queries, prioritize EPA and DOE
-        if detected_market == "US" and any(fuel_term in query.lower() for fuel_term in ["fuel", "gas", "alternative", "gasoline", "diesel"]):
-            for source in relevant_sources:
-                if "EPA" in source or "Department of Energy" in source:
-                    logger.info(f"Direct source match for US fuel query: {source}")
-                    return detected_market, source
+        # Check for regulatory agency mentions (medium-high weight)
+        for agency in patterns["agencies"]:
+            if agency.lower() in query_normalized:
+                market_scores[market] += 8
+                logger.info(f"Found agency match for {market}: {agency}")
         
-        # If we found relevant sources, use the first one
-        if relevant_sources:
-            logger.info(f"Using first relevant source for {detected_market}: {relevant_sources[0]}")
-            return detected_market, relevant_sources[0]
-        
-        # If no sources found for market, just return the market and let the fallback mechanism handle it
-        return detected_market, "NONE"
+        # Check for regulation mentions (medium weight)
+        for regulation in patterns["regulations"]:
+            if regulation.lower() in query_normalized:
+                market_scores[market] += 5
+                logger.info(f"Found regulation match for {market}: {regulation}")
     
-    # If direct matching failed or wasn't strong enough, use the LLM
-    prompt = f"""
-    Based on the following query about automotive regulations, determine:
-    1. Which market (country/region) the user is interested in
-    2. Which regulatory source would be most relevant to answer their query
+    # Stage 2: Check for specific topic-market associations
+    topic_market_mapping = {
+        "fuel economy": "US",
+        "cafe standard": "US",
+        "crash test": "US",
+        "emission standard": "US",
+        "alternative fuel": "US",
+        "zero emission": "US",
+        "type approval": "EU",
+        "exhaust emission": "EU",
+        "euro ncap": "EU",
+        "gb standard": "China",
+        "ais standard": "India",
+        "bharat stage": "India",
+        "cmvss": "Canada",
+        "adr": "Australia"
+    }
+    
+    for topic, market in topic_market_mapping.items():
+        if topic in query_normalized:
+            market_scores[market] += 7
+            logger.info(f"Found topic-market association: {topic} -> {market}")
+    
+    # Stage 3: Handle specific cases 
+    # US fuel types is a common question that needs special handling
+    if any(term in query_normalized for term in [" fuel ", "gasoline", "diesel", "electric vehicle", "ev ", "hydrogen"]):
+        if " in us" in query_normalized or "united states" in query_normalized:
+            market_scores["US"] += 15
+            logger.info("Detected US fuel type question with explicit US mention")
+        else:
+            # If 'fuel' is mentioned without a specific market, slightly favor US
+            market_scores["US"] += 5
+            logger.info("Detected fuel type question, adding weight to US market")
+    
+    # Stage 4: Determine if we have a clear winner
+    max_score = max(market_scores.values())
+    top_markets = [market for market, score in market_scores.items() if score == max_score]
+    
+    logger.info(f"Market scores: {market_scores}")
+    logger.info(f"Top markets: {top_markets}")
+    
+    # If we have a single clear winner with score above threshold
+    if len(top_markets) == 1 and max_score >= 10:
+        detected_market = top_markets[0]
+        logger.info(f"Clear market detected through pattern matching: {detected_market}")
+        return detected_market
+    
+    # If we have a tie or no strong signal, use the LLM for more sophisticated analysis
+    logger.info("No clear market detected through pattern matching, using LLM...")
+    
+    # Create a more effective LLM prompt with guidance and examples
+    llm_prompt = f"""
+    Based on the following query about automotive regulations, determine which country or region's regulatory framework is most relevant.
 
-    User query: {query}
+    Query: "{query}"
     
-    For US fuel type regulations, be sure to consider the US Environmental Protection Agency (EPA) and Department of Energy as they regulate vehicle fuels.
+    Consider these examples:
+    - "What are the FMVSS requirements for passenger vehicles?" → US
+    - "What Euro 6 emission standards apply to diesel engines?" → EU
+    - "What are the GB standards for electric vehicles in 2023?" → China
+    - "What regulations govern autonomous vehicles in Japan?" → Japan
     
-    Respond in the following format:
-    MARKET: [market name or "UNCLEAR"]
-    SOURCE: [exact name of the most relevant regulatory source or "NONE" if unclear]
+    The query may mention specific regulatory bodies (e.g., NHTSA, EPA for US; EC for EU), 
+    standards (e.g., FMVSS for US; Euro NCAP for EU), or regulations (e.g., Title 49 CFR for US).
     
-    If the market is unclear, respond with:
-    MARKET: UNCLEAR
-    SOURCE: NONE
+    If the query doesn't clearly indicate a market, consider which market would be most relevant 
+    based on the subject matter. For questions about fuel types, CAFE standards, or emissions 
+    without a specified market, the US regulations are often most relevant.
+    
+    Return only the market name from this list: US, EU, Global, UK, China, India, Japan, Canada, Australia
+    
+    If truly unable to determine, return "UNCLEAR".
     """
     
     try:
-        # Call LLM to determine market and source
-        logger.info("Calling LLM to determine market and source...")
+        # Call LLM with improved prompt
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=100
+            messages=[{"role": "user", "content": llm_prompt}],
+            max_tokens=10
         )
         
-        result_text = response.choices[0].message.content.strip()
-        logger.info(f"LLM response: {result_text}")
+        llm_market = response.choices[0].message.content.strip()
+        logger.info(f"LLM detected market: {llm_market}")
         
-        # Parse the response
-        market = "UNCLEAR"
-        source = "NONE"
+        # If LLM returns a valid market, use it
+        valid_markets = list(market_patterns.keys())
+        if llm_market in valid_markets:
+            return llm_market
         
-        lines = result_text.split('\n')
-        for line in lines:
-            if line.startswith("MARKET:"):
-                market = line.replace("MARKET:", "").strip()
-            elif line.startswith("SOURCE:"):
-                source = line.replace("SOURCE:", "").strip()
-        
-        # Validate source is in our list
-        if source != "NONE" and source not in REGULATORY_WEBSITES:
-            # Try to find a close match
-            for key in REGULATORY_WEBSITES.keys():
-                if source.lower() in key.lower() or key.lower() in source.lower():
-                    source = key
-                    break
-            else:
-                logger.warning(f"LLM returned invalid source: {source}")
-                source = "NONE"
-                
-        logger.info(f"Market determined: {market}, Source: {source}")
-        return market, source
+        # If LLM says UNCLEAR but we have some signals from keyword matching, use the highest scoring market
+        if llm_market == "UNCLEAR" and max_score > 0:
+            detected_market = top_markets[0]
+            logger.info(f"Using highest scoring market from pattern matching: {detected_market}")
+            return detected_market
+            
+        # If all else fails
+        return "UNCLEAR"
     except Exception as e:
-        logger.error(f"Error determining market and source: {str(e)}")
-        return "UNCLEAR", "NONE"
+        logger.error(f"Error in LLM market detection: {str(e)}")
+        
+        # Fall back to highest scoring market if available
+        if max_score > 0:
+            detected_market = top_markets[0]
+            logger.info(f"Falling back to highest scoring market due to LLM error: {detected_market}")
+            return detected_market
+        
+        return "UNCLEAR"
 
 def clean_url(url):
     """
@@ -613,313 +687,299 @@ def get_fallback_source(market):
     
     return valid_sources[0] if valid_sources else None
 
-def extract_pdf_links(url, query, client):
-    """Extract PDF links from the regulatory website by properly traversing the site structure."""
-    logger.info(f"Extracting real PDF links from {url}...")
+def process_multi_format_content(url, query, client):
+    """Process documents in multiple formats, not just PDFs."""
+    logger.info(f"Processing content from {url} in multiple formats...")
     
     try:
-        # Clean and validate the URL before using it
-        cleaned_url = clean_url(url)
-        
-        if cleaned_url != url:
-            logger.info(f"URL cleaned: {url} -> {cleaned_url}")
-            url = cleaned_url
-        
-        logger.info(f"Fetching content from {url}")
-        
-        # Add comprehensive request headers to mimic a browser
+        # Use session with proper headers
+        session = requests.Session()
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
+            'Referer': 'https://www.google.com/',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
-            'Referer': 'https://www.google.com/',  # Pretend we came from Google
-            'Cache-Control': 'max-age=0',
-            'TE': 'Trailers',
-            'DNT': '1'
+            'Cache-Control': 'max-age=0'
         }
         
-        session = requests.Session()
-        
-        # Try common URL variants if the original fails
+        # Try alternative URLs if needed
         urls_to_try = [
             url,
             url.replace("https://www.", "https://"),
-            "https://www." + url.replace("https://", "") if url.startswith("https://") else url,
-            # UNECE specific handling
-            url.replace("unece.org/trans/main/wp29/wp29regs.html", "unece.org/transport/vehicle-regulations-wp29") if "unece" in url else url,
-            "https://unece.org/transport/vehicle-regulations-wp29" if "unece" in url else url
+            "https://www." + url.replace("https://", "") if url.startswith("https://") else url
         ]
+        
+        # Add NHTSA specific alternatives if needed
+        if "nhtsa.gov" in url:
+            if "/laws-regulations/" not in url:
+                urls_to_try.append("https://www.nhtsa.gov/laws-regulations")
+                urls_to_try.append("https://www.nhtsa.gov/laws-regulations/fmvss")
+                
+            # NHTSA interpretations file - contains most of the legal interpretations
+            urls_to_try.append("https://www.nhtsa.gov/nhtsa-interpretation-file-search")
+            
+            # For fuel type questions specifically
+            if any(term in query.lower() for term in ["fuel", "gas", "gasoline", "diesel", "alternative"]):
+                urls_to_try.append("https://www.nhtsa.gov/vehicle-manufacturers/cafe-fuel-economy")
         
         response = None
         successful_url = None
+        content_source = ""
         
         for try_url in urls_to_try:
             try:
                 logger.info(f"Attempting to access: {try_url}")
-                response = session.get(try_url, headers=headers, timeout=30)
+                response = session.get(try_url, headers=headers, timeout=60)  # Increased timeout for NHTSA
                 
+                # Check if successful
                 if response.status_code == 200:
                     logger.info(f"Successfully accessed: {try_url}")
                     successful_url = try_url
+                    content_source = "website"
                     break
-                    
-                logger.warning(f"Failed to access {try_url}: {response.status_code}")
+                else:
+                    logger.warning(f"Failed to access {try_url}: {response.status_code}")
             except requests.exceptions.RequestException as e:
                 logger.error(f"Error accessing {try_url}: {str(e)}")
                 continue
                 
         if not response or response.status_code != 200:
             logger.error(f"Failed to access any URL variant for {url}")
-            return []
-        
-        # Update the URL to the successful one
-        url = successful_url
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Find all links on the page
-        links = soup.find_all('a')
-        
-        # Extract direct PDF links first
-        pdf_links = []
-        for link in links:
-            href = link.get('href')
-            if not href:
-                continue
-                
-            # Check if this is a PDF or a publications page
-            is_pdf = href.lower().endswith('.pdf')
-            is_publications_page = any(keyword in href.lower() for keyword in 
-                                        ['publication', 'document', 'regulation', 'standard', 
-                                         'directive', 'legislation', 'report', 'guideline'])
+            return {}
             
-            if is_pdf or is_publications_page:
-                # Make sure we have absolute URLs
-                full_url = href
-                if not href.startswith(('http://', 'https://')):
-                    # Handle relative URLs properly
-                    if href.startswith('/'):
-                        # Get base domain
-                        from urllib.parse import urlparse
-                        parsed_url = urlparse(url)
-                        base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
-                        full_url = base_url + href
-                    else:
-                        # Relative to current path
-                        if url.endswith('/'):
-                            full_url = url + href
-                        else:
-                            last_slash = url.rfind('/')
-                            if '.' in url[last_slash:]:  # URL points to a file
-                                base_url = url[:last_slash+1]
-                            else:  # URL points to a directory
-                                base_url = url + ('/' if not url.endswith('/') else '')
-                            full_url = base_url + href
+        # Detect content type
+        content_type = response.headers.get('Content-Type', '').lower()
+        logger.info(f"Content type: {content_type}")
+        
+        extracted_content = {}
+        
+        # Process based on content type
+        if 'application/pdf' in content_type or url.lower().endswith('.pdf'):
+            # PDF content
+            logger.info("Processing PDF content")
+            pdf_file = io.BytesIO(response.content)
+            
+            try:
+                reader = PyPDF2.PdfReader(pdf_file)
+                text = ""
                 
-                # Clean the URL
-                full_url = clean_url(full_url)
+                # Get total number of pages
+                total_pages = len(reader.pages)
+                logger.info(f"PDF has {total_pages} pages")
                 
-                # Add PDFs directly to our list
-                if is_pdf:
-                    title = link.text.strip() if link.text.strip() else os.path.basename(href)
-                    pdf_links.append((title, full_url))
-                    logger.info(f"Found PDF link: {title} - {full_url}")
-                    
-                # If it's a publications page, we'll check it for more PDFs
-                elif is_publications_page and full_url != url:  # Avoid checking the same page
-                    logger.info(f"Found publications page: {full_url}")
+                # Process all pages or a subset for very large documents
+                max_pages = min(100, total_pages)  # Process up to 100 pages
+                
+                for i in range(max_pages):
                     try:
-                        # Don't check pages we've already visited to avoid loops
-                        pub_response = session.get(full_url, headers=headers, timeout=30)
-                        
-                        if pub_response.status_code == 200:
-                            pub_soup = BeautifulSoup(pub_response.text, 'html.parser')
-                            pub_links = pub_soup.find_all('a')
-                            
-                            for pub_link in pub_links:
-                                pub_href = pub_link.get('href')
-                                if pub_href and pub_href.lower().endswith('.pdf'):
-                                    # Process similarly to above
-                                    if pub_href.startswith(('http://', 'https://')):
-                                        pub_full_url = pub_href
-                                    elif pub_href.startswith('/'):
-                                        from urllib.parse import urlparse
-                                        parsed_url = urlparse(full_url)
-                                        base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
-                                        pub_full_url = base_url + pub_href
-                                    else:
-                                        if full_url.endswith('/'):
-                                            pub_full_url = full_url + pub_href
-                                        else:
-                                            last_slash = full_url.rfind('/')
-                                            if '.' in full_url[last_slash:]:  # URL points to a file
-                                                base_url = full_url[:last_slash+1]
-                                            else:  # URL points to a directory
-                                                base_url = full_url + ('/' if not full_url.endswith('/') else '')
-                                            pub_full_url = base_url + pub_href
-                                    
-                                    pub_full_url = clean_url(pub_full_url)
-                                    
-                                    pub_title = pub_link.text.strip() if pub_link.text.strip() else os.path.basename(pub_href)
-                                    pdf_links.append((pub_title, pub_full_url))
-                                    logger.info(f"Found PDF link on publications page: {pub_title} - {pub_full_url}")
-                        else:
-                            logger.warning(f"Failed to access publications page {full_url}: {pub_response.status_code}")
-                    except Exception as pub_error:
-                        logger.error(f"Error processing publications page {full_url}: {str(pub_error)}")
+                        page = reader.pages[i]
+                        page_text = page.extract_text()
+                        if page_text:  # Only add if text was successfully extracted
+                            text += page_text + "\n\n"
+                    except Exception as page_error:
+                        logger.error(f"Error extracting text from page {i}: {str(page_error)}")
+                
+                # Add a note if we didn't process all pages
+                if total_pages > max_pages:
+                    text += f"\n\n[Note: Only the first {max_pages} pages of {total_pages} total pages were processed.]"
+                
+                if text.strip():
+                    extracted_content[os.path.basename(successful_url)] = text
+                    content_source = "pdf"
+                    logger.info(f"Successfully processed PDF: extracted {len(text)} characters")
+            except Exception as e:
+                logger.error(f"Error processing PDF: {str(e)}")
         
-        logger.info(f"Found {len(pdf_links)} PDF links")
-        
-        if not pdf_links:
-            logger.warning("No PDF links found on the regulatory website")
+        elif 'text/html' in content_type:
+            # HTML content
+            logger.info("Processing HTML content")
+            soup = BeautifulSoup(response.text, 'html.parser')
             
-            # If no direct PDF links found, try to find links to publications or document sections
-            doc_section_links = []
-            for link in links:
+            # Remove script and style elements that may interfere with content extraction
+            for script in soup(["script", "style", "nav", "footer", "header", "aside"]):
+                script.decompose()
+            
+            # Look for main content areas
+            main_content = ""
+            
+            # Try to find main content elements
+            content_containers = soup.select("main, article, .content, #content, .main-content, .entry-content, .post-content")
+            
+            if content_containers:
+                logger.info(f"Found {len(content_containers)} content containers")
+                for container in content_containers:
+                    container_text = container.get_text(separator='\n', strip=True)
+                    if len(container_text) > len(main_content):
+                        main_content = container_text
+            else:
+                # If no content containers found, extract from body with more careful processing
+                logger.info("No content containers found, extracting from body")
+                body = soup.find('body')
+                if body:
+                    # Remove common navigation and footer elements
+                    for elem in body.select('nav, footer, aside, .navigation, .menu, .sidebar, .widget, .comment'):
+                        elem.decompose()
+                    
+                    # Get all paragraphs and headings
+                    content_elements = body.select('p, h1, h2, h3, h4, h5, h6, .paragraph, li, td, th, dl, dt, dd')
+                    content_texts = []
+                    
+                    for elem in content_elements:
+                        text = elem.get_text(strip=True)
+                        if text and len(text) > 10:  # Ignore very small fragments
+                            content_texts.append(text)
+                    
+                    main_content = '\n\n'.join(content_texts)
+                    
+                    # If still empty, try getting all visible text from body
+                    if not main_content:
+                        main_content = body.get_text(separator='\n', strip=True)
+            
+            if main_content:
+                # Remove excessive whitespace
+                main_content = re.sub(r'\n\s*\n', '\n\n', main_content)
+                extracted_content[f"HTML content from {os.path.basename(successful_url)}"] = main_content
+                content_source = "html"
+                logger.info(f"Successfully extracted HTML content: {len(main_content)} characters")
+            else:
+                logger.warning("Failed to extract meaningful content from HTML")
+        
+        elif 'application/xml' in content_type or 'text/xml' in content_type or url.lower().endswith('.xml'):
+            # XML content
+            logger.info("Processing XML content")
+            try:
+                soup = BeautifulSoup(response.text, 'xml')
+                xml_text = soup.get_text(separator='\n', strip=True)
+                
+                if xml_text:
+                    extracted_content[f"XML content from {os.path.basename(successful_url)}"] = xml_text
+                    content_source = "xml"
+                    logger.info(f"Successfully processed XML: extracted {len(xml_text)} characters")
+            except Exception as e:
+                logger.error(f"Error processing XML: {str(e)}")
+        
+        elif 'application/json' in content_type or url.lower().endswith('.json'):
+            # JSON content
+            logger.info("Processing JSON content")
+            try:
+                json_data = response.json()
+                json_text = json.dumps(json_data, indent=2)
+                
+                if json_text:
+                    extracted_content[f"JSON content from {os.path.basename(successful_url)}"] = json_text
+                    content_source = "json"
+                    logger.info(f"Successfully processed JSON: extracted {len(json_text)} characters")
+            except Exception as e:
+                logger.error(f"Error processing JSON: {str(e)}")
+        
+        else:
+            # Plain text or other content
+            logger.info(f"Processing as plain text (content type: {content_type})")
+            text = response.text
+            
+            if text:
+                extracted_content[f"Content from {os.path.basename(successful_url)}"] = text
+                content_source = "text"
+                logger.info(f"Successfully processed text content: {len(text)} characters")
+        
+        # If no content was extracted, try as plain text
+        if not extracted_content and response.text:
+            logger.info("Falling back to plain text extraction")
+            extracted_content[f"Text from {os.path.basename(successful_url)}"] = response.text
+            content_source = "fallback_text"
+            logger.info(f"Used fallback text extraction: {len(response.text)} characters")
+        
+        # Look for links to other potentially relevant documents if content is sparse
+        if len('\n'.join(extracted_content.values())) < 1000 and content_source == "html":
+            logger.info("Content is sparse, looking for links to other documents")
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Keywords relevant to regulations
+            regulation_keywords = [
+                'regulation', 'regulatory', 'rule', 'law', 'compliance', 'standard', 'requirement',
+                'statute', 'directive', 'guidance', 'policy', 'procedure', 'manual', 'document',
+                'fmvss', 'nhtsa', 'certification', 'safety'
+            ]
+            
+            doc_links = []
+            for link in soup.find_all('a'):
                 href = link.get('href')
-                text = link.text.lower() if link.text else ""
+                text = link.get_text().lower()
                 
                 if not href:
                     continue
                     
-                # Keywords that might indicate document sections
-                doc_section_indicators = [
-                    'publication', 'document', 'library', 'resource', 'download',
-                    'regulation', 'directive', 'legislation', 'report', 'standard', 
-                    'guideline', 'technical', 'official', 'legal', 'policy'
-                ]
-                
-                if any(indicator in text or indicator in href.lower() for indicator in doc_section_indicators):
-                    # Process URL the same way as above
-                    if href.startswith(('http://', 'https://')):
-                        full_url = href
-                    elif href.startswith('/'):
+                # Make relative links absolute
+                if not href.startswith(('http://', 'https://')):
+                    if href.startswith('/'):
                         from urllib.parse import urlparse
-                        parsed_url = urlparse(url)
+                        parsed_url = urlparse(successful_url)
                         base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
-                        full_url = base_url + href
+                        href = base_url + href
                     else:
-                        if url.endswith('/'):
-                            full_url = url + href
+                        if successful_url.endswith('/'):
+                            href = successful_url + href
                         else:
-                            last_slash = url.rfind('/')
-                            if '.' in url[last_slash:]:  # URL points to a file
-                                base_url = url[:last_slash+1]
-                            else:  # URL points to a directory
-                                base_url = url + ('/' if not url.endswith('/') else '')
-                            full_url = base_url + href
-                    
-                    full_url = clean_url(full_url)
-                    
-                    # Avoid adding the same URL twice
-                    if full_url not in [link for _, link in doc_section_links]:
-                        doc_section_links.append((text, full_url))
-            
-            # Check document sections for PDFs
-            for section_text, section_url in doc_section_links[:5]:  # Limit to first 5 to avoid too many requests
-                if section_url == url:  # Skip the current URL to avoid loops
-                    continue
-                    
-                logger.info(f"Checking document section: {section_text} at {section_url}")
+                            href = successful_url + '/' + href
                 
+                # Check if link is relevant to regulations
+                is_relevant = any(keyword in text.lower() for keyword in regulation_keywords)
+                has_doc_extension = any(href.lower().endswith(ext) for ext in ['.pdf', '.doc', '.docx', '.txt', '.rtf', '.html'])
+                
+                if is_relevant or has_doc_extension:
+                    doc_links.append((text, href))
+            
+            # Process top 3 most relevant document links
+            for i, (link_text, link_href) in enumerate(doc_links[:3]):
+                logger.info(f"Following relevant document link: {link_text} at {link_href}")
                 try:
-                    section_response = session.get(section_url, headers=headers, timeout=30)
+                    link_response = session.get(link_href, headers=headers, timeout=30)
                     
-                    if section_response.status_code == 200:
-                        section_soup = BeautifulSoup(section_response.text, 'html.parser')
-                        section_links = section_soup.find_all('a')
+                    if link_response.status_code == 200:
+                        link_content_type = link_response.headers.get('Content-Type', '').lower()
                         
-                        for link in section_links:
-                            href = link.get('href')
-                            if href and href.lower().endswith('.pdf'):
-                                # Process URL the same way as above
-                                if href.startswith(('http://', 'https://')):
-                                    full_url = href
-                                elif href.startswith('/'):
-                                    from urllib.parse import urlparse
-                                    parsed_url = urlparse(section_url)
-                                    base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
-                                    full_url = base_url + href
-                                else:
-                                    if section_url.endswith('/'):
-                                        full_url = section_url + href
-                                    else:
-                                        last_slash = section_url.rfind('/')
-                                        if '.' in section_url[last_slash:]:  # URL points to a file
-                                            base_url = section_url[:last_slash+1]
-                                        else:  # URL points to a directory
-                                            base_url = section_url + ('/' if not section_url.endswith('/') else '')
-                                        full_url = base_url + href
+                        # Extract based on content type
+                        if 'application/pdf' in link_content_type or link_href.lower().endswith('.pdf'):
+                            # PDF
+                            pdf_file = io.BytesIO(link_response.content)
+                            try:
+                                reader = PyPDF2.PdfReader(pdf_file)
+                                text = ""
+                                max_pages = min(50, len(reader.pages))
                                 
-                                full_url = clean_url(full_url)
+                                for i in range(max_pages):
+                                    page_text = reader.pages[i].extract_text()
+                                    if page_text:
+                                        text += page_text + "\n\n"
                                 
-                                title = link.text.strip() if link.text.strip() else os.path.basename(href)
-                                pdf_links.append((title, full_url))
-                                logger.info(f"Found PDF link on document section page: {title} - {full_url}")
+                                if text.strip():
+                                    extracted_content[f"{link_text}"] = text
+                                    logger.info(f"Successfully processed linked PDF: {link_text}, {len(text)} characters")
+                            except Exception as e:
+                                logger.error(f"Error processing linked PDF: {str(e)}")
+                        elif 'text/html' in link_content_type:
+                            # HTML
+                            link_soup = BeautifulSoup(link_response.text, 'html.parser')
+                            for script in link_soup(["script", "style", "nav", "footer", "header"]):
+                                script.decompose()
+                            
+                            content = link_soup.get_text(separator='\n', strip=True)
+                            if content:
+                                extracted_content[f"{link_text}"] = content
+                                logger.info(f"Successfully processed linked HTML: {link_text}, {len(content)} characters")
                     else:
-                        logger.warning(f"Failed to access document section {section_url}: {section_response.status_code}")
-                except Exception as section_error:
-                    logger.error(f"Error checking document section {section_url}: {str(section_error)}")
+                        logger.warning(f"Failed to access linked document {link_href}: {link_response.status_code}")
+                except Exception as e:
+                    logger.error(f"Error following document link {link_href}: {str(e)}")
         
-        logger.info(f"Total PDF links found: {len(pdf_links)}")
+        return extracted_content
         
-        if not pdf_links:
-            logger.warning("No PDF links found after checking all potential document sections")
-            return []
-        
-        # Use LLM to select relevant PDFs based on the query (only if we have too many PDFs)
-        if len(pdf_links) > 5:
-            prompt = f"""
-            Based on the user query: "{query}", select the most relevant PDF documents from the following list.
-            Return the indices of the selected documents (0-based) as a comma-separated list.
-            
-            PDFs:
-            {pd.DataFrame(pdf_links, columns=['Title', 'URL']).to_string()}
-            
-            Return only the indices as a comma-separated list, without any additional text.
-            If none of the documents seem relevant to the query, return "NONE".
-            """
-            
-            logger.info("Calling LLM to select relevant PDFs...")
-            response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=100
-            )
-            
-            # Extract indices from response
-            indices_str = response.choices[0].message.content.strip()
-            logger.info(f"LLM response for PDF selection: {indices_str}")
-            
-            if indices_str == "NONE":
-                logger.warning("LLM determined no relevant PDFs for the query")
-                # Return a few PDFs anyway since we found them on the site
-                return pdf_links[:3]
-            
-            try:
-                indices = [int(idx.strip()) for idx in indices_str.split(',') if idx.strip().isdigit()]
-                
-                # Get selected PDFs
-                selected_pdfs = [pdf_links[idx] for idx in indices if idx < len(pdf_links)]
-                logger.info(f"Selected {len(selected_pdfs)} PDFs based on relevance")
-                
-                return selected_pdfs if selected_pdfs else pdf_links[:3]
-            except Exception as e:
-                logger.error(f"Error parsing LLM response for PDF selection: {str(e)}")
-                # Return a subset of PDFs if parsing fails
-                return pdf_links[:3]
-        else:
-            # If we have a reasonable number of PDFs, just return all of them
-            return pdf_links
-    
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error fetching website {url}: {str(e)}")
-        return []
     except Exception as e:
-        logger.error(f"Error extracting PDF links: {str(e)}")
-        return []
+        logger.error(f"Error processing content from {url}: {str(e)}")
+        return {}
+
 
 def download_and_process_pdfs(pdf_urls):
     """Download PDFs and extract content."""
@@ -1351,7 +1411,7 @@ def analyze_content_with_token_management(query, pdf_contents, client):
         return "I apologize, but I encountered an error while processing your query. Please try again or rephrase your question."
 
 def process_query(query, market=None, source=None, client=None):
-    """Process a query using the simplified agent."""
+    """Process a query using the improved agent."""
     logger.info(f"Processing query: {query}, market: {market or 'Auto-detect'}, source: {source or 'Auto-detect'}")
     
     results = {
@@ -1359,8 +1419,7 @@ def process_query(query, market=None, source=None, client=None):
         "market": market,
         "source": source,
         "selected_url": "",
-        "pdf_urls": [],
-        "pdf_contents": {},
+        "content_items": {},
         "final_answer": ""
     }
     
@@ -1371,147 +1430,144 @@ def process_query(query, market=None, source=None, client=None):
         return results
     
     # Step 2: Determine market and source if not provided
-    if not source:
-        logger.info("Determining market and source...")
-        determined_market, determined_source = get_market_and_source(query, client)
-        
-        # If market was provided but source wasn't, keep the provided market
-        if market and not source:
-            results["source"] = determined_source
-        # If neither was provided, use both determined values
-        elif not market and not source:
-            results["market"] = determined_market
-            results["source"] = determined_source
-        
-        if results["source"] == "NONE":
-            logger.warning("Could not determine source automatically")
-            
-            # Try to find a source based on the market if we have one
-            if results["market"] and results["market"] != "UNCLEAR":
-                fallback_source = get_fallback_source(results["market"])
-                if fallback_source:
-                    logger.info(f"Using fallback source for market {results['market']}: {fallback_source}")
-                    results["source"] = fallback_source
-                else:
-                    results["final_answer"] = f"I couldn't determine which regulatory source would be most relevant for your query about {results['market']}. Please select a specific source and try again."
-                    return results
-            else:
-                results["final_answer"] = "I couldn't determine which regulatory source would be most relevant for your query. Please select a specific source and try again."
-                return results
+    if not market:
+        logger.info("Determining market...")
+        # Use enhanced market detection instead of the basic get_market_and_source
+        results["market"] = enhanced_market_detection(query, client)
+        logger.info(f"Enhanced market detection result: {results['market']}")
     
-    # Step 3: Select URL based on the source
-    if results["source"] in REGULATORY_WEBSITES:
-        results["selected_url"] = REGULATORY_WEBSITES[results["source"]]
-        logger.info(f"Selected URL: {results['selected_url']}")
-    else:
-        logger.warning(f"Source {results['source']} not found in regulatory websites")
+    # If we have a market but no source, find the most relevant source for that market
+    if results["market"] != "UNCLEAR" and not source:
+        logger.info(f"Determining appropriate source for market: {results['market']}")
+        # Find sources that match the market
+        matching_sources = []
         
-        # Try to find a close match for the source
-        close_match = None
-        for key in REGULATORY_WEBSITES.keys():
-            if results["source"].lower() in key.lower() or key.lower() in results["source"].lower():
-                close_match = key
-                break
+        # Check each source to see if it matches the market
+        for source_name, url in REGULATORY_WEBSITES.items():
+            if results["market"].lower() in source_name.lower():
+                matching_sources.append(source_name)
         
-        if close_match:
-            logger.info(f"Found close match for source: {close_match}")
-            results["source"] = close_match
-            results["selected_url"] = REGULATORY_WEBSITES[close_match]
-        else:
-            # Try to find any source for the market if we have one
-            if results["market"] and results["market"] != "UNCLEAR":
-                fallback_source = get_fallback_source(results["market"])
-                if fallback_source:
-                    logger.info(f"Using fallback source for market {results['market']}: {fallback_source}")
-                    results["source"] = fallback_source
-                    results["selected_url"] = REGULATORY_WEBSITES[fallback_source]
-                else:
-                    results["final_answer"] = f"I apologize, but I don't have information on the regulatory source '{results['source']}'. Please select one of the available sources."
-                    return results
-            else:
-                results["final_answer"] = f"I apologize, but I don't have information on the regulatory source '{results['source']}'. Please select one of the available sources."
-                return results
-    
-    # Step 4: Extract PDF links
-    max_attempts = 3
-    attempt = 1
-    while attempt <= max_attempts:
-        logger.info(f"Attempt {attempt}/{max_attempts} to extract PDF links from {results['selected_url']}")
-        results["pdf_urls"] = extract_pdf_links(results["selected_url"], query, client)
-        
-        if results["pdf_urls"]:
-            break
-        
-        # If we couldn't find any PDFs, try an alternative source
-        if attempt < max_attempts:
-            if results["market"] and results["market"] != "UNCLEAR":
-                # Try to find sources for this market
-                market_sources = []
-                for source_name in REGULATORY_WEBSITES.keys():
-                    if results["market"].lower() in source_name.lower():
-                        if source_name != results["source"]:  # Don't use the same source again
-                            market_sources.append(source_name)
-                
-                if market_sources:
-                    # Use the next available source
-                    next_source = market_sources[min(attempt-1, len(market_sources)-1)]
-                    logger.info(f"Trying alternative source: {next_source}")
-                    results["source"] = next_source
-                    results["selected_url"] = REGULATORY_WEBSITES[next_source]
-                else:
-                    # No more sources to try for this market
+        # For US queries about fuel, prioritize EPA or DOE sources
+        if results["market"] == "US" and any(term in query.lower() for term in ["fuel", "gas", "alternative", "gasoline", "diesel", "ev", "electric"]):
+            for source_name in matching_sources:
+                if "EPA" in source_name or "Environmental" in source_name or "Energy" in source_name:
+                    results["source"] = source_name
+                    logger.info(f"Selected source for US fuel query: {source_name}")
                     break
-            else:
-                # No market information to try alternative sources
-                break
         
-        attempt += 1
+        # If we haven't selected a source yet but have matching sources, use the first one
+        if not results.get("source") and matching_sources:
+            results["source"] = matching_sources[0]
+            logger.info(f"Selected first matching source: {results['source']}")
+        # If no matching sources, set to NONE to trigger fallback
+        elif not matching_sources:
+            results["source"] = "NONE"
     
-    if not results["pdf_urls"]:
-        logger.warning("No relevant PDF links found after all attempts")
-        results["final_answer"] = "I couldn't find any relevant regulatory documents for your query. Please try a different query with more specific terms related to automotive regulations."
-        return results
-    
-    # Step 5: Download and process PDFs
-    results["pdf_contents"] = download_and_process_pdfs(results["pdf_urls"])
-    if not results["pdf_contents"]:
-        logger.warning("No PDF contents could be extracted")
+    # If we still don't have a source, use LLM to determine the best source
+    if not results.get("source") or results["source"] == "NONE":
+        logger.info("Using LLM to determine best source...")
         
-        # Try using a different approach: get information from the website itself
-        logger.info("Attempting to extract information directly from the website")
+        # Create a formatted list of all available regulatory sources
+        source_list = ""
+        for s_name, s_url in REGULATORY_WEBSITES.items():
+            source_list += f"- {s_name}: {s_url}\n"
+        
+        prompt = f"""
+        Based on the following query about automotive regulations, determine which regulatory source would be most relevant to answer it.
+
+        User query: "{query}"
+        
+        Available regulatory sources:
+        {source_list}
+        
+        Return ONLY the exact name of the most relevant regulatory source from the list above.
+        """
         
         try:
-            # Clean and validate the URL before using it
-            url = clean_url(results["selected_url"])
+            # Call LLM to determine source
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=100
+            )
             
-            # Fetch content
-            response = requests.get(url, timeout=30)
-            response.raise_for_status()
+            determined_source = response.choices[0].message.content.strip()
+            logger.info(f"LLM suggested source: {determined_source}")
             
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # Extract text from the website
-            text_content = soup.get_text()
-            
-            # Clean up the text (remove excess whitespace, etc.)
-            text_content = re.sub(r'\s+', ' ', text_content).strip()
-            
-            # Create a content from the website text
-            if text_content:
-                results["pdf_contents"] = {
-                    f"Website content from {results['source']}": text_content
-                }
-                logger.info(f"Successfully extracted text directly from website: {len(text_content)} characters")
+            # Check if the LLM's suggested source exists in our list
+            if determined_source in REGULATORY_WEBSITES:
+                results["source"] = determined_source
+            else:
+                # Try to find a close match
+                for key in REGULATORY_WEBSITES.keys():
+                    if determined_source.lower() in key.lower() or key.lower() in determined_source.lower():
+                        results["source"] = key
+                        logger.info(f"Found close match for source: {key}")
+                        break
+                else:
+                    logger.warning(f"LLM returned invalid source: {determined_source}")
+                    results["source"] = "NONE"
+                
         except Exception as e:
-            logger.error(f"Error extracting website content: {str(e)}")
+            logger.error(f"Error determining source with LLM: {str(e)}")
+            results["source"] = "NONE"
+    
+    # Select URL based on source, or fall back to market-based selection
+    if results["source"] and results["source"] != "NONE" and results["source"] in REGULATORY_WEBSITES:
+        results["selected_url"] = REGULATORY_WEBSITES[results["source"]]
+        logger.info(f"Selected URL based on source: {results['selected_url']}")
+    elif results["market"] and results["market"] != "UNCLEAR":
+        # Try to find any source for the market if we have one
+        logger.info(f"No valid source found, looking for any source for market: {results['market']}")
         
-        # If we still don't have content, return an appropriate message
-        if not results["pdf_contents"]:
-            results["final_answer"] = "I couldn't successfully download or extract content from the regulatory documents. Please try again later or with a different query."
+        for source_name, url in REGULATORY_WEBSITES.items():
+            if results["market"].lower() in source_name.lower():
+                results["source"] = source_name
+                results["selected_url"] = url
+                logger.info(f"Found fallback source for market: {source_name}")
+                break
+        else:
+            # If still no source, provide informative error
+            results["final_answer"] = f"I couldn't determine a specific regulatory source for {results['market']} regulations on this topic. Please select a specific source and try again."
+            return results
+    else:
+        # If all attempts fail, provide a helpful error message
+        results["final_answer"] = "I couldn't determine which regulatory source would be most relevant for your query. Please specify a market (like US, EU, China) or a specific regulatory agency in your query."
+        return results
+    
+    # Process content from the selected URL - now handling multiple formats, not just PDFs
+    logger.info(f"Extracting content from {results['selected_url']}...")
+    results["content_items"] = process_multi_format_content(results["selected_url"], query, client)
+    
+    # Check if we got any content
+    if not results["content_items"]:
+        logger.warning("No content could be extracted from the selected source")
+        
+        # Try one more source from the same market as fallback
+        logger.info("Trying fallback source from the same market")
+        tried_already = [results["source"]]
+        
+        for source_name, url in REGULATORY_WEBSITES.items():
+            if source_name not in tried_already and (results["market"].lower() in source_name.lower() or "Global" in source_name):
+                logger.info(f"Trying alternative source: {source_name}")
+                results["source"] = source_name
+                results["selected_url"] = url
+                results["content_items"] = process_multi_format_content(url, query, client)
+                
+                if results["content_items"]:
+                    logger.info(f"Successfully extracted content from fallback source")
+                    break
+                
+                tried_already.append(source_name)
+        
+        # If still no content, provide informative error
+        if not results["content_items"]:
+            results["final_answer"] = "I couldn't find relevant content to answer your query in the regulatory sources I checked. This could be due to technical difficulties accessing the websites, or because the specific information isn't available in the sources I have access to."
             return results
     
-    # Step 6: Analyze content and generate answer with token limit management
-    results["final_answer"] = analyze_content_with_token_management(query, results["pdf_contents"], client)
+    # Analyze content and generate answer with token limit management
+    logger.info(f"Analyzing content from {len(results['content_items'])} items...")
+    results["final_answer"] = analyze_content_with_token_management(query, results["content_items"], client)
     
     return results
 
