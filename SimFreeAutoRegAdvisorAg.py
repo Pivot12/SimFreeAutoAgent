@@ -257,17 +257,13 @@ def create_polished_diagram():
                               edge_color='gray', style='dashed', arrowsize=20, 
                               arrowstyle='->', connectionstyle='arc3,rad=-0.1')
         
-        # Create text background boxes for better readability
-        text_boxes = {node: {"bbox": {"boxstyle": "round,pad=0.5", 
-                                     "facecolor": "white", 
-                                     "alpha": 0.8, 
-                                     "edgecolor": "#00000044"}} 
-                     for node in G.nodes()}
+        # FIX: Create a single bbox parameter for all labels instead of per-node
+        bbox_props = dict(boxstyle="round,pad=0.5", facecolor="white", alpha=0.8, edgecolor="#00000044")
         
         # Draw node labels with background boxes to avoid overlaps
         nx.draw_networkx_labels(G, pos, font_size=11, font_weight='bold', 
-                                labels={n: n for n in G.nodes()},
-                                bbox=text_boxes)
+                               labels={n: n for n in G.nodes()},
+                               bbox=bbox_props)
         
         # Add a legend for node categories
         legend_elements = [
@@ -306,7 +302,6 @@ def create_polished_diagram():
     except Exception as e:
         logger.error(f"Error creating diagram: {str(e)}")
         return None
-
 # Function to get client IP address
 def get_client_ip():
     """Get the client IP address for diagnostic logging."""
