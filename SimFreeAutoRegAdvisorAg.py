@@ -361,7 +361,7 @@ REGULATORY_WEBSITES = {
     
     "EU European Commission" : "ec.europa.eu/transport/home_en​",
     
-    "European Automobile Manufacturers' Association (ACEA)" : "ACEA Regulatory Guide 2023​",
+    "European Automobile Manufacturers' Association (ACEA)" : "https://www.acea.auto/publication/automotive-regulatory-guide-2023/",
     
     "International Organization for Standardization (ISO) – Road Vehicles" : "www.iso.org/committee/45306.html​",
     
