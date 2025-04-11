@@ -838,33 +838,33 @@ def main():
     
     # Create a collapsible section for the diagram
     with st.expander("Click to view the application architecture diagram"):
-    try:
-        # Generate polished diagram image
-        with st.spinner("Generating process flow diagram..."):
-            diagram_image = create_polished_diagram()
-            if diagram_image:
-                # Display the image
-                st.image(diagram_image, caption="Automotive Regulations AI Process Flow", use_column_width=True)
-                
-                # Add download option
-                img_str = get_image_base64(diagram_image)
-                if img_str:
-                    href = f'<a href="data:image/png;base64,{img_str}" download="auto_regs_process_flow.png">Download Diagram</a>'
-                    st.markdown(href, unsafe_allow_html=True)
-            else:
-                raise Exception("Failed to generate diagram")
-    except Exception as e:
-        st.error(f"Could not generate diagram: {str(e)}")
-        # Fall back to text-based diagram
-        st.code("""
-        User Input → Process Query → Initialize Agent → Processing Pipeline → Document Analysis → Generate Answer
-                                                            ↑                      ↑                 ↑
-                                                       Groq LLM API connections (provides intelligence)
-                                                            ↑                      ↑
-                                                      Error Handling (monitors process)
-                                                                                   ↓
-                                                                            PDF Processing
-        """)
+        try:
+            # Generate polished diagram image
+            with st.spinner("Generating process flow diagram..."):
+                diagram_image = create_polished_diagram()
+                if diagram_image:
+                    # Display the image
+                    st.image(diagram_image, caption="Automotive Regulations AI Process Flow", use_column_width=True)
+                    
+                    # Add download option
+                    img_str = get_image_base64(diagram_image)
+                    if img_str:
+                        href = f'<a href="data:image/png;base64,{img_str}" download="auto_regs_process_flow.png">Download Diagram</a>'
+                        st.markdown(href, unsafe_allow_html=True)
+                else:
+                    raise Exception("Failed to generate diagram")
+        except Exception as e:
+            st.error(f"Could not generate diagram: {str(e)}")
+            # Fall back to text-based diagram
+            st.code("""
+            User Input → Process Query → Initialize Agent → Processing Pipeline → Document Analysis → Generate Answer
+                                                                ↑                      ↑                 ↑
+                                                           Groq LLM API connections (provides intelligence)
+                                                                ↑                      ↑
+                                                          Error Handling (monitors process)
+                                                                                       ↓
+                                                                                PDF Processing
+            """)
     
     # Explanation of the diagram
     st.markdown("""
