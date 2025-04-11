@@ -176,38 +176,31 @@ class GitHubLogger:
             return False
 
 # Diagram Image Creation
-def create_polished_diagram():
-    """Create a polished process flow diagram using NetworkX and Matplotlib"""
+def create_simple_polished_diagram():
+    """Create a simplified polished process flow diagram compatible with most matplotlib versions"""
     try:
         # Create a directed graph
         G = nx.DiGraph()
         
-        # Define node positions with better spacing to avoid overlaps
+        # Define simpler node positions
         positions = {
-            "User Input": (0, 4),
-            "Market Selection": (0, 2),
-            "Process Query": (3, 3),
-            "Initialize Agent": (6, 3),
-            "Processing Pipeline": (9, 3),
-            "Document Analysis": (12, 3),
-            "Generate Answer": (15, 3),
-            "Groq LLM API": (9, 0),
-            "PDF Processing": (12, 1),
-            "Error Handling": (6, 0),
+            "User Input": (0, 2),
+            "Market Selection": (0, 0),
+            "Process Query": (2, 1),
+            "Initialize Agent": (4, 1),
+            "Processing Pipeline": (6, 1),
+            "Document Analysis": (8, 1),
+            "Generate Answer": (10, 1),
+            "Groq LLM API": (6, -1),
+            "PDF Processing": (8, -1),
+            "Error Handling": (4, -1),
         }
         
-        # Add nodes with positions
+        # Add nodes
         for node, pos in positions.items():
             G.add_node(node, pos=pos)
-            
-        # Define node categories for coloring
-        ui_nodes = ["User Input", "Market Selection"]
-        core_nodes = ["Process Query", "Initialize Agent", "Processing Pipeline", 
-                      "Document Analysis", "Generate Answer", "PDF Processing"]
-        service_nodes = ["Groq LLM API"]
-        utility_nodes = ["Error Handling"]
         
-        # Define edges with proper connections
+        # Add edges
         edges = [
             ("User Input", "Process Query"),
             ("Market Selection", "Process Query"),
@@ -217,85 +210,56 @@ def create_polished_diagram():
             ("Document Analysis", "Generate Answer"),
             ("Document Analysis", "PDF Processing"),
             ("PDF Processing", "Document Analysis"),
-        ]
-        
-        # Add special edges (dashed lines) for services and utilities
-        dashed_edges = [
             ("Groq LLM API", "Processing Pipeline"),
             ("Groq LLM API", "Document Analysis"),
             ("Groq LLM API", "Generate Answer"),
             ("Error Handling", "Processing Pipeline"),
             ("Error Handling", "Document Analysis"),
         ]
-        
-        # Add all edges to the graph
         G.add_edges_from(edges)
-        G.add_edges_from(dashed_edges)
         
-        # Create the figure with high DPI and large size for clarity
-        plt.figure(figsize=(14, 8), dpi=150, facecolor='white')
+        # Create figure with white background
+        plt.figure(figsize=(12, 6), dpi=100, facecolor='white')
         
-        # Get node positions from the graph
+        # Get positions
         pos = nx.get_node_attributes(G, 'pos')
         
-        # Draw nodes with custom styling by category
-        nx.draw_networkx_nodes(G, pos, nodelist=ui_nodes, node_color="#d0f0c0", 
-                              node_size=3000, alpha=1, edgecolors='black', linewidths=2)
-        nx.draw_networkx_nodes(G, pos, nodelist=core_nodes, node_color="#c5daf9", 
-                              node_size=3000, alpha=1, edgecolors='black', linewidths=2)
-        nx.draw_networkx_nodes(G, pos, nodelist=service_nodes, node_color="#f9d6c5", 
-                              node_size=3000, alpha=1, edgecolors='black', linewidths=2)
-        nx.draw_networkx_nodes(G, pos, nodelist=utility_nodes, node_color="#f9c5c5", 
-                              node_size=3000, alpha=1, edgecolors='black', linewidths=2)
+        # Define node colors
+        node_colors = []
+        for node in G.nodes():
+            if node in ["User Input", "Market Selection"]:
+                node_colors.append("#d0f0c0")  # User Interface
+            elif node in ["Process Query", "Initialize Agent", "Processing Pipeline", 
+                          "Document Analysis", "Generate Answer", "PDF Processing"]:
+                node_colors.append("#c5daf9")  # Core Processing
+            elif node == "Groq LLM API":
+                node_colors.append("#f9d6c5")  # External API
+            else:
+                node_colors.append("#f9c5c5")  # Error Handling
         
-        # Draw regular edges (solid lines)
-        nx.draw_networkx_edges(G, pos, edgelist=edges, width=2, edge_color='black',
-                              arrowsize=25, arrowstyle='->', connectionstyle='arc3,rad=0.1')
+        # Draw nodes
+        nx.draw_networkx_nodes(G, pos, node_size=2000, node_color=node_colors, 
+                             edgecolors='black', linewidths=1)
         
-        # Draw special edges (dashed lines)
-        nx.draw_networkx_edges(G, pos, edgelist=dashed_edges, width=2, 
-                              edge_color='gray', style='dashed', arrowsize=20, 
-                              arrowstyle='->', connectionstyle='arc3,rad=-0.1')
+        # Draw edges
+        nx.draw_networkx_edges(G, pos, width=1.5, arrowsize=20)
         
-        # FIX: Create a single bbox parameter for all labels instead of per-node
-        bbox_props = dict(boxstyle="round,pad=0.5", facecolor="white", alpha=0.8, edgecolor="#00000044")
+        # Draw labels with simple white background
+        nx.draw_networkx_labels(G, pos, font_size=10, font_weight='bold')
         
-        # Draw node labels with background boxes to avoid overlaps
-        nx.draw_networkx_labels(G, pos, font_size=11, font_weight='bold', 
-                               labels={n: n for n in G.nodes()},
-                               bbox=bbox_props)
+        # Add title
+        plt.title('Automotive Regulations AI Agent - Process Flow')
         
-        # Add a legend for node categories
-        legend_elements = [
-            plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#d0f0c0', 
-                      markersize=15, label='User Interface'),
-            plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#c5daf9', 
-                      markersize=15, label='Core Processing'),
-            plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#f9d6c5', 
-                      markersize=15, label='External API'),
-            plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#f9c5c5', 
-                      markersize=15, label='Error Handling'),
-            plt.Line2D([0], [0], color='black', lw=2, label='Direct Flow'),
-            plt.Line2D([0], [0], color='gray', lw=2, linestyle='--', label='Support Flow')
-        ]
-        plt.legend(handles=legend_elements, loc='upper center', 
-                  bbox_to_anchor=(0.5, 0.05), ncol=3, fontsize=10)
-        
-        # Add a title
-        plt.title('Automotive Regulations AI Agent Process Flow', 
-                 fontsize=16, fontweight='bold', pad=20)
-        
-        # Remove axes and tight layout
+        # Remove axes
         plt.axis('off')
-        plt.tight_layout()
         
         # Save the figure to a BytesIO object
         buffer = BytesIO()
         plt.savefig(buffer, format='png', bbox_inches='tight')
-        plt.close()
         buffer.seek(0)
+        plt.close()
         
-        # Create and return PIL Image
+        # Create image from buffer
         image = Image.open(buffer)
         return image
         
