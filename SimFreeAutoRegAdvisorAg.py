@@ -851,7 +851,7 @@ def main():
                 diagram_image = create_diagram_image()
                 if diagram_image:
                     # Display the image
-                    st.image(diagram_image, caption="Automotive Regulations AI Process Flow", use_column_width=True)
+                    st.image(diagram_image, caption="Automotive Regulations AI Process Flow", use_container_width=True)
                     
                     # Add download option
                     img_str = get_image_base64(diagram_image)
