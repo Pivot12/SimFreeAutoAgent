@@ -176,7 +176,7 @@ class GitHubLogger:
             return False
 
 # Diagram Image Creation
-def create_simple_polished_diagram():
+def create_polished_diagram():
     """Create a simplified polished process flow diagram compatible with most matplotlib versions"""
     try:
         # Create a directed graph
