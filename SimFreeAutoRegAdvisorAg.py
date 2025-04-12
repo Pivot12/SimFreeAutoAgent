@@ -692,6 +692,18 @@ def process_multi_format_content(url, query, client):
     logger.info(f"Processing content from {url} in multiple formats...")
     
     try:
+        # Check if it's actually a URL or just a text string
+        import re
+        if not re.search(r'\.(gov|org|com|net|int|eu|info|edu|mil|[a-z]{2})(/|$)', url) and not url.startswith(('http://', 'https://')):
+            logger.warning(f"Not a valid website URL: {url}")
+            # For cases like "ACEA Regulatory Guide 2023" which isn't a URL
+            if "ACEA" in url:
+                # Fall back to the actual URL for ACEA
+                url = "https://www.acea.auto/publications/"
+                logger.info(f"Using fallback URL for ACEA: {url}")
+            else:
+                return {}  # Return empty result for non-URL strings
+        
         # Use session with proper headers
         session = requests.Session()
         headers = {
@@ -703,6 +715,9 @@ def process_multi_format_content(url, query, client):
             'Upgrade-Insecure-Requests': '1',
             'Cache-Control': 'max-age=0'
         }
+        
+        # Clean the URL more thoroughly to remove invisible characters
+        url = clean_url(url)
         
         # Try alternative URLs if needed
         urls_to_try = [
@@ -723,6 +738,16 @@ def process_multi_format_content(url, query, client):
             # For fuel type questions specifically
             if any(term in query.lower() for term in ["fuel", "gas", "gasoline", "diesel", "alternative"]):
                 urls_to_try.append("https://www.nhtsa.gov/vehicle-manufacturers/cafe-fuel-economy")
+        
+        # Special handling for troublesome domains
+        if "unece.org" in url:
+            urls_to_try.append("https://unece.org/transport/vehicle-regulations-wp29")
+            urls_to_try.append("https://unece.org/transport/standards/transport/vehicle-regulations-wp29")
+        
+        # Make sure URLs are unique
+        urls_to_try = list(dict.fromkeys(urls_to_try))
+        
+        logger.info(f"URLs to try: {urls_to_try}")
         
         response = None
         successful_url = None
